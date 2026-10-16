@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>大会運営 | Supabase接続確認</title>
+<style>:root{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN',sans-serif;color:#173044;background:#f0f5f7}*{box-sizing:border-box}body{margin:0}main{max-width:700px;margin:auto;padding:20px 16px 48px}h1{font-size:23px}h2{font-size:18px;margin-top:26px}.card{background:white;border:1px solid #d8e2e8;padding:17px;border-radius:14px;margin-top:14px}label{font-weight:700;display:block;margin:16px 0 6px}input{width:100%;padding:12px;border:1px solid #b7c8d0;border-radius:9px;font-size:16px}button{border:0;border-radius:10px;padding:14px 18px;background:#146b60;color:white;font-size:16px;font-weight:700;width:100%;margin-top:18px}button:disabled{opacity:.5}small,p{line-height:1.6}.muted{color:#506a78}.status{padding:12px;background:#eaf1f5;border-radius:9px;white-space:pre-wrap;overflow-wrap:anywhere}.ok{color:#087445}.bad{color:#ac3030}table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:10px 5px;border-bottom:1px solid #e7eef0;text-align:left}code{overflow-wrap:anywhere}a{color:#0a6966}#results{display:none}</style>
+</head><body><main><h1>🏓 Supabase接続確認</h1><p class="muted">大会運営アプリのデータベースを、iPhoneのSafariから<strong>読み取りだけ</strong>でテストします。現在の試作版の結果は変更しません。</p>
+<div class="card"><h2>① 接続情報を入力</h2><label for="url">Project URL</label><input id="url" type="url" placeholder="https://xxxxxxxx.supabase.co" autocapitalize="off" autocomplete="off" spellcheck="false"><label for="key">Publishable key（公開用キー）</label><input id="key" type="text" placeholder="sb_publishable_..." autocapitalize="off" autocomplete="off" spellcheck="false"><small class="muted">※ Secret key / service_role key / データベースのパスワードは絶対に入力しないでください。入力内容はこのページのサーバーには保存せず、テスト通信にだけ使用します。</small><button id="test">② 接続テストを実行</button></div>
+<div id="results" class="card"><h2>③ テスト結果</h2><div id="status" class="status" role="status" aria-live="polite">接続中...</div><table><thead><tr><th>テーブル</th><th>取得結果</th></tr></thead><tbody id="rows"></tbody></table><div id="demo"></div></div>
+<div class="card"><h2>次の段階</h2><p>5テーブルの読み取りに成功したら、既存アプリをSupabase対応に改修します。スタッフ認証が完成するまでは、スコアの共有書き込みは有効にしません。</p><a href="./index.html">元の試作アプリに戻る</a></div>
+</main>
+<script>
+const names=['tournaments','categories','pairs','courts','matches'];
+const $=id=>document.getElementById(id);
+$('test').addEventListener('click',async()=>{
+  const url=$('url').value.trim().replace(/\/+$/,'');const key=$('key').value.trim();
+  if(!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)){alert('Project URLの形式を確認してください（https://...supabase.co）');return}
+  if(!key.startsWith('sb_publishable_')&&!key.startsWith('eyJ')){alert('Publishable key または legacy anon keyを使用してください。Secret keyは入力しないでください。');return}
+  if(key.startsWith('sb_secret_')){alert('Secret keyは使用できません');return}
+  $('test').disabled=true;$('results').style.display='block';$('status').textContent='Supabaseに接続しています...';$('rows').textContent='';$('demo').textContent='';let ok=0;
+  for(const name of names){
+    const tr=document.createElement('tr');const n=document.createElement('td');n.textContent=name;const v=document.createElement('td');v.textContent='確認中';tr.append(n,v);$('rows').append(tr);
+    try{
+      const res=await fetch(`${url}/rest/v1/${name}?select=*&limit=25`,{headers:{apikey:key,...(key.startsWith('eyJ')?{Authorization:`Bearer ${key}`}:{}),'Accept':'application/json'}});
+      const body=await res.json();
+      if(!res.ok)throw Error((body.message||body.hint||JSON.stringify(body)).slice(0,300));
+      if(!Array.isArray(body))throw Error('配列形式ではありません');
+      v.textContent=`成功（先頭 ${body.length} 件取得）`;v.className='ok';ok++;
+      if(name==='matches'){
+        const found=body.find(r=>r.id==='DEMO001');
+        if(found){const p=document.createElement('p');p.textContent=`テスト試合 DEMO001：${found.score_a} 対 ${found.score_b} ／状態：${found.status}`;$('demo').append(p)}
+      }
+    }catch(e){v.textContent=`失敗：${e.message}`;v.className='bad'}
+  }
+  $('status').textContent=ok===5?'接続成功：5つのテーブルを読み取れました。':'一部のテーブルを読み取れませんでした。下のエラーを確認してください。';
+  $('status').className='status '+(ok===5?'ok':'bad');$('test').disabled=false;
+});
+</script></body></html>
