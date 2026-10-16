@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>v9 中級・女子 順位承認テスト</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;background:#f3f6f8;color:#193144;margin:0}
+header{background:#123849;color:#fff;padding:20px}h1{font-size:20px;margin:0}header small{color:#c3dce7}
+main{max-width:760px;margin:auto;padding:16px 16px 60px}.card{border:1px solid #d8e3e9;border-radius:14px;background:#fff;padding:16px;margin:14px 0}
+button{border:0;border-radius:10px;padding:12px 16px;background:#087769;color:#fff;font-weight:700;font-size:15px;margin:4px}
+button.secondary{background:#e1eef1;color:#21465b}button:disabled{background:#c5d4d5;color:#57666d}
+input{width:100%;font-size:16px;padding:12px;margin:6px 0 12px;border:1px solid #bdcfd8;border-radius:10px;box-sizing:border-box}
+label{font-size:13px;font-weight:700}.notice{background:#fff0dc;padding:12px;border-radius:10px;line-height:1.6}
+.ok{color:#08795e}.bad{color:#a43d26}table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid #ebeff3;text-align:left;padding:9px 5px}
+code{word-break:break-all}#status{white-space:pre-wrap;line-height:1.6}h2{font-size:17px}.group{border-bottom:1px solid #ddd;padding:14px 0}
+</style></head><body>
+<header><h1>v9 中級チャレンジ・女子中級 順位承認テスト</h1><small>テスト環境専用 / 既存の本番アプリは変更しません</small></header>
+<main>
+<div class="notice">このページは <b>pickleball-v9-test</b> 専用です。承認ボタンはテストDBを更新します。<code>index.html</code> と <code>supabase-config.js</code> は変更しないでください。</div>
+<div class="card"><h2>① 接続確認</h2><p>接続先：<code id="endpoint"></code></p><button id="refresh" class="secondary">データ再取得</button><p id="summary">読み込み中…</p></div>
+<div class="card"><h2>② スタッフログイン</h2><label for="email">テスト用メールアドレス</label><input id="email" type="email" autocomplete="username"><label for="password">テスト用パスワード</label><input id="password" type="password" autocomplete="current-password"><button id="signin">ログイン</button><button id="signout" class="secondary">ログアウト</button><p id="authstate">確認中…</p></div>
+<div class="card"><h2>③ グループ順位と承認</h2><p>予選6試合完了後、順位を確認してから承認してください。承認後の取り消しはこのページでは行いません。</p><div id="groups">読み込み中…</div></div>
+<div class="card"><h2>④ 決勝・順位決定戦への反映</h2><div id="fixtures">読み込み中…</div></div>
+<div class="card"><h2>実行ログ</h2><div id="status">まだ操作していません。</div></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+'use strict';
+const URL_TEST='https://ehhqpamckkrgqmsweywa.supabase.co';
+const PUBLISHABLE='sb_publishable_BspMYe51i8XAjXU03Y5qFA_Rrgl91rq';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+$('endpoint').textContent=URL_TEST;
+if(!window.supabase?.createClient){$('summary').textContent='Supabaseライブラリの読み込みに失敗しました';throw Error('supabase-js unavailable')}
+const db=window.supabase.createClient(URL_TEST,PUBLISHABLE,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:'pickleball-v9-test-auth'}});
+let staff=false,rankings=[],pairs=[],games=[],busy=false;
+const targets=[['challenge','A'],['challenge','B'],['challenge','C'],['women','A'],['women','B']];
+const categoryName={challenge:'中級チャレンジ',women:'女子中級'};
+function log(msg,isError=false){$('status').textContent=msg;$('status').className=isError?'bad':'ok'}
+function pair(id){return pairs.find(x=>x.id===id)?.display_name||id||'未確定'}
+function groupMatches(cat,g){return games.filter(x=>x.category_id===cat&&x.phase==='preliminary'&&x.group_name===g)}
+function completed(m){return m.status==='completed'&&m.score_a!==null&&m.score_b!==null}
+function standings(cat,g){
+ const map=new Map();
+ for(const p of pairs.filter(x=>x.category_id===cat&&x.group_name===g))map.set(p.id,{id:p.id,wins:0,diff:0,points:0,played:0});
+ for(const m of groupMatches(cat,g).filter(completed)){
+  for(const [id,own,opp] of [[m.pair_a_id,m.score_a,m.score_b],[m.pair_b_id,m.score_b,m.score_a]]){
+   const s=map.get(id);if(!s)continue;s.played++;s.wins+=Number(own>opp);s.diff+=own-opp;s.points+=own;
+  }
+ }
+ return [...map.values()].sort((a,b)=>b.wins-a.wins||b.diff-a.diff||b.points-a.points||a.id.localeCompare(b.id));
+}
+function render(){
+ $('groups').innerHTML=targets.map(([cat,g])=>{
+  const mm=groupMatches(cat,g),n=mm.filter(completed).length;
+  const rr=rankings.filter(x=>x.category_id===cat&&x.group_name===g).sort((a,b)=>a.rank-b.rank);
+  const approved=rr.length===4,ss=standings(cat,g);
+  const tie=ss.some((s,i)=>i>0&&s.wins===ss[i-1].wins&&s.diff===ss[i-1].diff&&s.points===ss[i-1].points);
+  const rows=approved?rr.map(x=>`${x.rank}位 ${esc(x.pair_id)} ${esc(pair(x.pair_id))}`).join('<br>'):
+   ss.map((x,i)=>`${i+1}位 ${esc(x.id)} ${esc(pair(x.id))}（${x.wins}勝・得失点${x.diff>=0?'+':''}${x.diff}）`).join('<br>');
+  const can=staff&&!busy&&!approved&&mm.length===6&&n===6&&ss.length===4&&!tie;
+  return `<div class="group"><b>${esc(categoryName[cat])} ${g}組</b>：予選 ${n}/${mm.length}試合　${approved?'<span class="ok">承認済</span>':'未承認'}<p style="line-height:1.8">${rows||'ペア情報未取得'}</p>${tie?'<p class="bad">順位決定指標が完全同率です。承認できません。</p>':''}<button data-cat="${cat}" data-group="${g}" ${can?'':'disabled'}>この組の順位を承認</button></div>`;
+ }).join('');
+ document.querySelectorAll('#groups button[data-cat]').forEach(b=>b.addEventListener('click',()=>approve(b.dataset.cat,b.dataset.group)));
+ const ids=['M075','M082','M090','M084','M077'];
+ $('fixtures').innerHTML='<table><tr><th>試合</th><th>時刻</th><th>対戦</th><th>状態</th></tr>'+ids.map(id=>{
+  const m=games.find(x=>x.id===id);
+  if(!m)return `<tr><td>${id}</td><td colspan="3">試合データなし</td></tr>`;
+  return `<tr><td>${id}</td><td>${esc(m.scheduled_hhmm)}</td><td>${esc(m.pair_a_id?pair(m.pair_a_id):m.pair_a_label||'未確定')}<br>vs ${esc(m.pair_b_id?pair(m.pair_b_id):m.pair_b_label||'未確定')}</td><td>${esc(m.status)}</td></tr>`;
+ }).join('')+'</table>';
+}
+async function checkAuth(){
+ const {data:{user},error}=await db.auth.getUser();
+ if(error||!user){staff=false;$('authstate').textContent='未ログイン';render();return}
+ const r=await db.from('staff_users').select('user_id,is_active').eq('user_id',user.id).eq('is_active',true).maybeSingle();
+ staff=!!r.data&&!r.error;
+ $('authstate').textContent=staff?'ログイン済み（テスト運営スタッフ）':'ログイン済みですがスタッフ権限が確認できません';
+ render();
+}
+async function load(){
+ try{
+  const [m,p,a]=await Promise.all([
+   db.from('matches').select('id,category_id,phase,group_name,status,pair_a_id,pair_b_id,pair_a_label,pair_b_label,scheduled_hhmm,score_a,score_b').order('id'),
+   db.from('pairs').select('id,category_id,group_name,display_name'),
+   db.from('approved_group_rankings').select('category_id,group_name,rank,pair_id')
+  ]);
+  for(const r of [m,p,a])if(r.error)throw r.error;
+  games=m.data||[];pairs=p.data||[];rankings=a.data||[];
+  $('summary').innerHTML=`試合 <b>${games.length}</b> 件 / ペア <b>${pairs.length}</b> 件 / 承認済順位 <b>${rankings.length}</b> 件`+
+   (games.length===78&&pairs.length===42?' <span class="ok">（想定件数一致）</span>':' <span class="bad">（想定78試合・42ペアと異なります。操作を停止してください）</span>');
+  render();
+ }catch(e){log('データ取得エラー: '+e.message,true)}
+}
+async function approve(cat,g){
+ if(!staff||busy||games.length!==78||pairs.length!==42)return;
+ const mm=groupMatches(cat,g),ss=standings(cat,g);
+ if(mm.length!==6||mm.filter(completed).length!==6||ss.length!==4||rankings.some(x=>x.category_id===cat&&x.group_name===g))return;
+ if(ss.some((s,i)=>i>0&&s.wins===ss[i-1].wins&&s.diff===ss[i-1].diff&&s.points===ss[i-1].points))return;
+ const summary=ss.map((s,i)=>`${i+1}位 ${s.id}`).join('\n');
+ if(!confirm(`【テスト環境のみ】${categoryName[cat]} ${g}組の順位を承認します。\n${summary}\n\n承認後は決勝カードが更新される可能性があります。続けますか？`))return;
+ busy=true;render();
+ try{
+  const {data,error}=await db.rpc('staff_approve_group',{p_category:cat,p_group:g});
+  if(error)log(`${categoryName[cat]} ${g}組 承認エラー: ${error.message}`,true);
+  else log(`${categoryName[cat]} ${g}組 承認成功: ${JSON.stringify(data)}`);
+  await load();
+ }finally{busy=false;render()}
+}
+$('refresh').addEventListener('click',async()=>{await load();await checkAuth()});
+$('signin').addEventListener('click',async()=>{
+ const email=$('email').value.trim(),password=$('password').value;
+ if(!email||!password){log('メールアドレスとパスワードを入力してください',true);return}
+ const {error}=await db.auth.signInWithPassword({email,password});$('password').value='';
+ if(error){log('ログインエラー: '+error.message,true);return}
+ log('ログインしました');await checkAuth();await load();
+});
+$('signout').addEventListener('click',async()=>{await db.auth.signOut();await checkAuth();log('ログアウトしました')});
+db.auth.onAuthStateChange(()=>{setTimeout(()=>checkAuth(),0)});
+load().then(checkAuth);
+</script></body></html>
