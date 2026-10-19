@@ -50,7 +50,7 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const opt=(value,label,selected)=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`;
 const CONF=window.PICKLEBALL_SUPABASE_CONFIG||{};
 const TABS=[['home','概要'],['matches','試合一覧'],['courts','コート別'],['bracket','決勝トーナメント'],['ranking','順位'],['pairs','ペア検索']];
-const state={tab:'home',loading:false,error:'',auth:null,staff:false,staffError:'',tournaments:[],categories:[],stages:[],pairs:[],matches:[],courts:[],category:'all',tournament:'all',pair:'',group:'',rankings:[],approved:[],rankingError:'',bracketError:'',bracketSlots:[],officialResults:[],officialError:"",officialLoaded:false,rankingRows:{},rankingLoadErrors:{},rankingLoading:false,approvedLoaded:false,approvedError:'',lastLoaded:null};
+const state={tab:'home',loading:false,error:'',auth:null,staff:false,staffError:'',tournaments:[],categories:[],stages:[],pairs:[],matches:[],courts:[],category:'all',tournament:'all',pair:'',group:'',rankings:[],approved:[],rankingError:'',bracketError:'',bracketSlots:[],officialResults:[],officialError:"",officialLoaded:false,rankingRows:{},rankingLoadErrors:{},rankingLoading:false,approvedLoaded:false,approvedError:'',qualificationLocks:[],qualificationLocksLoaded:false,qualificationLocksError:'',lastLoaded:null};
 let client=null;
 if(/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test((CONF.url||'').replace(/\/+$/,'')) && /^sb_publishable_/.test(CONF.key||'') && window.supabase?.createClient){client=window.supabase.createClient(CONF.url,CONF.key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}})}else state.error='Supabase公開用設定または認証ライブラリを確認してください。';
 const catName=id=>state.categories.find(x=>x.id===id)?.name||'カテゴリー不明';
@@ -169,11 +169,19 @@ function rankingGroups(){
 }
 async function refreshRankings(){
  if(!client||state.loading)return;
- const groups=rankingGroups();state.rankingLoading=true;state.rankingRows={};state.rankingLoadErrors={};state.approvedError='';state.approvedLoaded=false;render();
+ const groups=rankingGroups();state.rankingLoading=true;state.rankingRows={};state.rankingLoadErrors={};state.approvedError='';state.approvedLoaded=false;state.qualificationLocks=[];state.qualificationLocksLoaded=false;state.qualificationLocksError='';render();
  try{
   const result=await client.from('approved_group_rankings').select('category_id,group_name,rank,pair_id,approved_at');
   if(result.error)throw Error('承認順位：'+result.error.message);
   state.approved=result.data||[];state.approvedLoaded=true;
+  // Use confirmed qualifier rows, not bracket match slots, for the revocation lock.
+  // Fail closed when the read-only lock RPC cannot be loaded.
+  if(state.staff){
+   const lockResult=await client.rpc('get_staff_knockout_qualification_locks');
+   if(lockResult.error){state.qualificationLocksError=lockResult.error.message;}
+   else{state.qualificationLocks=(lockResult.data||[]).map(x=>x.category_id);state.qualificationLocksLoaded=true;}
+  }
+
   // Limit requests in batches to keep the preview responsive at larger events.
   for(let i=0;i<groups.length;i+=8){
    await Promise.all(groups.slice(i,i+8).map(async g=>{
@@ -196,12 +204,14 @@ function ranking(){
   const active=state.pairs.filter(x=>x.category_id===g.cat&&x.group_name===g.group&&x.participation_status==='active');
   const complete=g.games.length>0&&g.games.every(m=>(isDone(m)&&m.score_a!==m.score_b&&m.pair_a_id&&m.pair_b_id)||(isWalkover(m)&&m.walkover_winner_pair_id&&(m.walkover_winner_pair_id===m.pair_a_id||m.walkover_winner_pair_id===m.pair_b_id)));
   const tied=rows.some((r,i)=>rows.findIndex(x=>Number(x.rank)===Number(r.rank))!==i);
-  const qualified=state.bracketSlots.some(x=>state.stages.find(s=>s.id===x.stage_id)?.category_id===cat);
+  const qualified=state.qualificationLocks.includes(cat);
+  const lockKnown=state.qualificationLocksLoaded&&!state.qualificationLocksError;
+
   const ready=!loading&&!err&&complete&&rows.length>=2&&rows.length===active.length&&approved.length===0;
   const status=approved.length?'正式承認済み':!complete?'試合未終了':tied?'同順位あり':'未承認';
   const rowsDisplay=[...rows].sort((a,b)=>(approvedMap.get(a.pair_id)??Number(a.rank))-(approvedMap.get(b.pair_id)??Number(b.rank))||Number(a.rank)-Number(b.rank)||pairName(a.pair_id).localeCompare(pairName(b.pair_id)));
-  const actions=!state.staff||loading||err?'':approved.length?`<button class="btn secondary mini-btn" data-ranking-revoke="${esc(g.key)}">承認を取り消す</button>`:tied?`<button class="btn mini-btn" data-ranking-resolve="${esc(g.key)}" ${ready?'':'disabled'}>同順位を手動解決（管理者）</button>`:`<button class="btn mini-btn" data-ranking-approve="${esc(g.key)}" ${ready?'':'disabled'}>順位を正式承認</button>`;
-  return `<section class="card"><div class="row"><h3>${esc(g.group)}組</h3><span class="status ${approved.length?'done':complete?'pending':''}">${esc(status)}</span></div>${err?`<div class="empty-error">順位取得エラー：${esc(err)}</div>`:loading?'<p class="prompt">読み込み中…</p>':`<div class="tablebox"><table class="tbl"><thead><tr><th>順位</th><th>ペア</th><th>勝</th><th>負</th><th>得失点</th><th>総得点</th><th>試合</th></tr></thead><tbody>${rowsDisplay.map(r=>`<tr><td><b>${esc(approvedMap.get(r.pair_id)??r.rank)}位</b>${!approved.length&&rows.filter(x=>Number(x.rank)===Number(r.rank)).length>1?' <span class="status pending">同順位</span>':''}</td><td>${esc(r.pair_name||pairName(r.pair_id))}</td><td>${Number(r.wins)}</td><td>${Number(r.losses)}</td><td>${Number(r.point_difference)}</td><td>${Number(r.points_scored)}</td><td>${Number(r.played)}</td></tr>`).join('')||'<tr><td colspan="7">順位データがありません</td></tr>'}</tbody></table></div>`}<div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="prompt">${g.games.filter(m=>isDone(m)||isWalkover(m)).length}/${g.games.length}試合終了${qualified?' ／ 決勝対戦枠あり':''}</span>${actions}</div>${qualified&&approved.length?'<p class="prompt">決勝進出者の状態により承認取消が制限されます。最終判定はサーバー側で行います。</p>':''}</section>`;
+  const actions=!state.staff||loading||err?'':approved.length?`<button class="btn secondary mini-btn" data-ranking-revoke="${esc(g.key)}" ${qualified||!lockKnown?'disabled':''}>承認を取り消す</button>`:tied?`<button class="btn mini-btn" data-ranking-resolve="${esc(g.key)}" ${ready?'':'disabled'}>同順位を手動解決（管理者）</button>`:`<button class="btn mini-btn" data-ranking-approve="${esc(g.key)}" ${ready?'':'disabled'}>順位を正式承認</button>`;
+  return `<section class="card"><div class="row"><h3>${esc(g.group)}組</h3><span class="status ${approved.length?'done':complete?'pending':''}">${esc(status)}</span></div>${err?`<div class="empty-error">順位取得エラー：${esc(err)}</div>`:loading?'<p class="prompt">読み込み中…</p>':`<div class="tablebox"><table class="tbl"><thead><tr><th>順位</th><th>ペア</th><th>勝</th><th>負</th><th>得失点</th><th>総得点</th><th>試合</th></tr></thead><tbody>${rowsDisplay.map(r=>`<tr><td><b>${esc(approvedMap.get(r.pair_id)??r.rank)}位</b>${!approved.length&&rows.filter(x=>Number(x.rank)===Number(r.rank)).length>1?' <span class="status pending">同順位</span>':''}</td><td>${esc(r.pair_name||pairName(r.pair_id))}</td><td>${Number(r.wins)}</td><td>${Number(r.losses)}</td><td>${Number(r.point_difference)}</td><td>${Number(r.points_scored)}</td><td>${Number(r.played)}</td></tr>`).join('')||'<tr><td colspan="7">順位データがありません</td></tr>'}</tbody></table></div>`}<div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="prompt">${g.games.filter(m=>isDone(m)||isWalkover(m)).length}/${g.games.length}試合終了${qualified?' ／ 決勝進出者確定済み':''}</span>${actions}</div>${approved.length&&(qualified||!lockKnown)?`<p class="prompt">${qualified?'決勝進出者が確定済みのため、順位承認を取り消せません。':'決勝進出者の確定状態を確認できないため、承認取消を停止しています。'+esc(state.qualificationLocksError)}</p>`:''}</section>`;
  }).join('')}`).join('')||'<div class="empty">予選のグループ別試合はまだありません。</div>'}`;
 }
 function targetRankingGroup(key){return rankingGroups().find(g=>g.key===key)}
@@ -212,6 +222,8 @@ async function approveRanking(key){
 }
 async function revokeRanking(key){
  const g=targetRankingGroup(key);if(!g||!state.staff||!state.approvedLoaded)return;
+ if(!state.qualificationLocksLoaded||state.qualificationLocksError){alert('決勝進出者の確定状態を確認できないため、承認取消を停止しています。更新してください。');return}
+ if(state.qualificationLocks.includes(g.cat)){alert('決勝進出者が確定済みのため、順位承認を取り消せません。');return}
  if(!confirm(`${catName(g.cat)} / ${g.group}組の順位承認を取り消しますか？\n決勝進出者確定後は取り消せません。`))return;
  try{const {error}=await client.rpc('staff_revoke_group_approval',{p_category_id:g.cat,p_group_name:g.group});if(error)throw error;await loadData();alert('順位の承認を取り消しました。')}catch(e){alert('承認取消に失敗しました：'+e.message);await loadData()}
 }
@@ -241,7 +253,7 @@ async function loadData(){if(!client){state.error='Supabaseに接続できませ
 function closeModal(){ $('overlay').innerHTML='' }
 function modal(inner){$('overlay').innerHTML=`<div class="modalback" id="modalback"><div class="modal">${inner}</div></div>`;$('modalback').onclick=e=>{if(e.target.id==='modalback')closeModal()};document.querySelectorAll('[data-close]').forEach(x=>x.onclick=closeModal)}
 function loginModal(){modal(`<div class="row"><h2 style="margin:0">スタッフログイン</h2><button class="btn secondary mini-btn" data-close>閉じる</button></div><label>メールアドレス</label><input class="field" id="email" type="email" autocomplete="username"><label>パスワード</label><input class="field" id="password" type="password" autocomplete="current-password"><p class="prompt">V10テスト画面と同じメールアドレス・パスワードを使用します。</p><p id="authMsg" class="prompt" role="status"></p><button class="btn wide" id="signIn">ログイン</button>`);$('signIn').onclick=async()=>{let b=$('signIn');b.disabled=true;try{let {error}=await client.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});$('password').value='';if(error)throw error;closeModal();await refreshAuth();await loadData()}catch(e){$('authMsg').textContent='ログインできません：'+e.message}finally{if(b.isConnected)b.disabled=false}}}
-async function refreshAuth(){if(!client)return;const {data,error}=await client.auth.getUser();state.auth=error?null:data.user||null;state.staff=false;state.staffError='';if(state.auth){let {data:role,error:re}=await client.from('staff_users').select('user_id').eq('user_id',state.auth.id).eq('is_active',true).maybeSingle();state.staff=!re&&!!role;state.staffError=re?.message||''}render()}
+async function refreshAuth(){if(!client)return;const {data,error}=await client.auth.getUser();state.auth=error?null:data.user||null;state.staff=false;state.staffError='';if(state.auth){let {data:role,error:re}=await client.from('staff_users').select('user_id').eq('user_id',state.auth.id).eq('is_active',true).maybeSingle();state.staff=!re&&!!role;state.staffError=re?.message||''}state.qualificationLocksLoaded=false;state.qualificationLocks=[];render()}
 async function signOut(){if(!client)return;let {error}=await client.auth.signOut();if(error){alert(error.message);return}state.auth=null;state.staff=false;render();await loadData()}
 async function confirmOfficial(categoryId){
  if(!state.staff||officialLocked(categoryId))return;
@@ -261,5 +273,5 @@ if($('confirmWalkover'))$('confirmWalkover').onclick=()=>{let value=prompt('不�
 if($('revokeWalkover'))$('revokeWalkover').onclick=()=>{const reason=prompt('不戦勝取消の理由を入力してください（必須）');if(!reason?.trim()){alert('理由が必要です');return}act('staff_revoke_walkover',{p_match_id:m.id,p_expected_updated_at:m.updated_at,p_reason:reason.trim()},'不戦勝を取り消しますか？')};
 if($('revokeScore'))$('revokeScore').onclick=()=>{const reason=prompt('試合結果取消の理由を入力してください（必須）\n※後続の試合が開始・終了している場合、取消は拒否されます。');if(reason===null)return;if(!reason.trim()){alert('取消理由が必要です。');return}act('staff_revoke_score',{p_match_id:m.id,p_expected_updated_at:m.updated_at,p_reason:reason.trim()},'スコア '+m.score_a+' - '+m.score_b+' を取り消し、試合を未実施に戻しますか？\n※この操作は監査履歴に記録されます。')};
 }
-if(client){client.auth.onAuthStateChange(()=>setTimeout(refreshAuth,0));refreshAuth().then(loadData)}else render();
+if(client){client.auth.onAuthStateChange(()=>setTimeout(async()=>{await refreshAuth();if(!state.loading&&!state.error)await refreshRankings()},0));refreshAuth().then(loadData)}else render();
 </script></body></html>
