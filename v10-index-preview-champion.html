@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#10273d"><title>Pickleball Tournament Manager | v10 開発プレビュー</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif;color:#182f3c;background:#f2f6f8}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1080px;margin:auto;padding:0 15px 96px}header{background:#10283d;color:white;padding:22px 16px 18px}header .inner{max-width:1050px;margin:auto}h1{font-size:20px;margin:3px 0 5px}.muted{color:#647584}.light{color:#b6cad6}small{font-size:12px}.tag{display:inline-block;background:#d9eee7;color:#13705a;padding:4px 9px;border-radius:20px;font-size:11px;font-weight:700}.nav{display:flex;position:sticky;top:0;background:white;border-bottom:1px solid #dbe4e9;z-index:5;overflow:auto}.nav button{border:0;background:white;color:#5a7181;padding:15px 14px;white-space:nowrap;font-weight:700;font-size:13px}.nav button.active{color:#096b61;border-bottom:3px solid #199880}h2{font-size:17px;margin:23px 0 13px}p{line-height:1.55}button,input,select{font:inherit}button{cursor:pointer}.btn{background:#116c62;color:white;border:0;border-radius:11px;padding:12px 16px;font-weight:700}.btn.secondary{background:#e8f1f2;color:#214c59}.btn:disabled{opacity:.4}.flex{display:flex;gap:9px;align-items:center}.between{justify-content:space-between}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:17px 0}.metric{background:white;border-radius:12px;padding:15px 10px}.metric strong{display:block;font-size:25px;margin-top:7px}.metric small{color:#71838c}.card{background:white;border:1px solid #dde6ea;border-radius:14px;padding:14px;margin:9px 0;box-shadow:0 1px 3px #10283d07}.card h3{font-size:15px;margin:0 0 9px}.line{border-top:1px solid #edf0f2;margin:12px 0}.row{display:flex;justify-content:space-between;gap:10px;align-items:center}.field{width:100%;border:1px solid #cedde3;border-radius:10px;padding:12px;background:white;font-size:16px;min-width:0}label{font-size:12px;font-weight:700;color:#567181;display:block;margin-bottom:6px}.filters{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:13px 0}.match{border-left:4px solid #5d9b9a}.stage{font-size:12px;color:#647885}.teams{font-weight:750;font-size:14px;margin:9px 0}.status{font-size:11px;border-radius:30px;padding:4px 8px;background:#edf2f5;color:#586b77;white-space:nowrap}.status.done{background:#ddf5e9;color:#0c7658}.status.pending{background:#fff0d6;color:#96601c}.score{font-size:18px;font-weight:800}.notice{padding:12px 14px;border-radius:11px;background:#fff0da;color:#79551f;font-size:13px;line-height:1.5;margin:13px 0}.notice.blue{background:#e6eff8;color:#2d5b7d}.bottom{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #dce6ec;padding:9px 12px max(9px,env(safe-area-inset-bottom));display:flex;justify-content:space-evenly;z-index:10}.bottom button{background:none;border:0;font-size:11px;color:#69818d;padding:6px;font-weight:700}.bottom button.active{color:#087b69}.tablebox{overflow-x:auto}.tbl{border-collapse:collapse;width:100%;font-size:13px}.tbl th,.tbl td{padding:11px 9px;text-align:left;border-bottom:1px solid #e9eef1;white-space:nowrap}.tbl th{color:#516a7a;font-size:12px;background:#f6fafb}.pill{display:inline-block;border-radius:15px;font-size:11px;padding:4px 7px;background:#edf2f6}.hide{display:none}.modalback{position:fixed;inset:0;background:#001b2ba6;display:flex;align-items:end;justify-content:center;z-index:30}.modal{background:white;border-radius:20px 20px 0 0;padding:22px;width:100%;max-width:560px;max-height:90vh;overflow:auto}.scoreinputs{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin:18px 0}.scoreinputs input{text-align:center;font-size:27px;font-weight:800}.secondary-text{color:#637685;font-size:12px}.selectwide{width:100%}.mini{font-size:12px}.authline{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.progress{background:#e4edef;border-radius:9px;overflow:hidden;height:9px}.progress>div{height:100%;background:#219a7b}.empty{text-align:center;padding:35px 12px;color:#72818a}footer{color:#788c96;font-size:12px;padding:16px 0}@media(min-width:760px){.grid{grid-template-columns:repeat(3,1fr)}.filters{grid-template-columns:repeat(3,1fr)}.bottom{display:none}.wrap{padding-bottom:25px}.modalback{align-items:center}.modal{border-radius:18px}}
+
+/* bracket visualization */
+.bracket-scroller{overflow:auto;max-height:75vh;border:1px solid #dbe4e9;border-radius:14px;background:#fbfdfe;overscroll-behavior:contain}
+.bracket-board{position:relative;min-height:180px}
+.bracket-lines{position:absolute;inset:0;pointer-events:none;z-index:0}
+.bracket-match{position:absolute;width:194px;min-height:86px;background:white;border:1px solid #d5e2e7;border-radius:12px;padding:9px 10px;box-shadow:0 2px 5px #0e354012;z-index:1;font-size:12px}
+.bracket-match.bye{border-style:dashed}.bracket-match .bracket-head{font-size:10px;color:#687f8c;display:flex;justify-content:space-between;gap:4px;margin-bottom:5px}
+.bracket-team{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:3px 4px;border-radius:5px;overflow:hidden}
+.bracket-team>span:first-child{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.bracket-team.win{background:#e0f5e9;color:#0b7254;font-weight:750}
+.bracket-match button{width:100%;padding:5px;margin-top:5px;font-size:11px;border-radius:6px}
+.bracket-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:#536b77;margin:8px 0 12px}
+.bracket-stage{margin-bottom:24px}
+
+/* Winner summary: UI-derived only, not an official certification */
+.champion-panel{border:1px solid #c6e1d5;border-radius:16px;background:linear-gradient(130deg,#f0faf5,#fff);padding:18px;margin:12px 0 17px;text-align:center}
+.champion-kicker{font-size:12px;font-weight:800;letter-spacing:.09em;color:#317b5c}
+.champion-name{font-size:clamp(20px,4vw,29px);font-weight:850;color:#15553e;overflow-wrap:anywhere;margin:8px 0}
+.champion-result{font-size:14px;font-weight:700;color:#365d4d}
+.champion-caption{font-size:11px;color:#5f7771;margin:10px 0 0;line-height:1.6}
+.champion-pending{background:#f7f9fa;border-color:#dbe4e9;text-align:left}
+.champion-pending .champion-kicker{color:#617987}
+.bracket-match.final-winner{border-color:#50a180;box-shadow:0 0 0 2px #d8eee2,0 2px 5px #0e354012}
+
+/* v10 preview enhancements */
+.badge-walkover{background:#fff0d6;color:#81511b}.safe-alert{background:#fff0d6;color:#76501b}.stack{display:grid;gap:12px}.wide{width:100%}.tabs-note{margin-top:8px}.round{margin-bottom:18px}.round-title{font-size:14px;color:#536f7b;margin:18px 0 8px}.prompt{font-size:13px;color:#5d7281}.modal-actions{display:grid;gap:10px;margin-top:16px}.auth-inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.empty-error{color:#9e3d3d;padding:13px;border-radius:10px;background:#fdf0f0}.mini-btn{font-size:12px;padding:8px 11px}.mono{font-variant-numeric:tabular-nums}
+@media(min-width:760px){.modal-actions{grid-template-columns:1fr 1fr}}
+</style></head>
+<body>
+<header><div class="inner"><div class="authline"><span class="tag">Supabase v10 開発プレビュー</span><span class="light mini">V9デザイン踏襲</span></div><h1>Pickleball Tournament Manager</h1><small class="light">試合確認・結果入力・順位チェック</small></div></header>
+<div class="nav" id="tabs"></div>
+<main class="wrap" id="screen"><div class="card">画面を読み込み中です…</div></main>
+<nav class="bottom" id="bottom"></nav><div id="overlay"></div>
+<script src="./supabase-config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const opt=(value,label,selected)=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`;
+const CONF=window.PICKLEBALL_SUPABASE_CONFIG||{};
+const TABS=[['home','概要'],['matches','試合一覧'],['courts','コート別'],['bracket','決勝トーナメント'],['ranking','順位'],['pairs','ペア検索']];
+const state={tab:'home',loading:false,error:'',auth:null,staff:false,staffError:'',tournaments:[],categories:[],stages:[],pairs:[],matches:[],courts:[],category:'all',tournament:'all',pair:'',group:'',rankings:[],approved:[],rankingError:'',bracketError:'',bracketSlots:[],lastLoaded:null};
+let client=null;
+if(/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test((CONF.url||'').replace(/\/+$/,'')) && /^sb_publishable_/.test(CONF.key||'') && window.supabase?.createClient){client=window.supabase.createClient(CONF.url,CONF.key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}})}else state.error='Supabase公開用設定または認証ライブラリを確認してください。';
+const catName=id=>state.categories.find(x=>x.id===id)?.name||'カテゴリー不明';
+const pairName=id=>!id?'対戦相手未確定':state.pairs.find(x=>x.id===id)?.display_name||'ペア名未取得';
+const stageFor=m=>state.stages.find(x=>x.id===m.stage_id);
+const stageLabel=m=>({preliminary:'予選',knockout:'決勝トーナメント',placement:'順位決定'}[stageFor(m)?.stage_type]||stageFor(m)?.name||'ステージ未設定');
+const courtName=id=>state.courts.find(c=>c.id===id)?.name||(id?String(id):'未割当');
+const timeOf=m=>m.start_time?new Date(m.start_time).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):(m.scheduled_hhmm||'時刻未設定');
+const isDone=m=>m.status==='completed'&&m.score_a!=null&&m.score_b!=null;
+const isWalkover=m=>m.status==='walkover';
+const winnerName=m=>isWalkover(m)?pairName(m.walkover_winner_pair_id):isDone(m)?pairName(m.score_a>m.score_b?m.pair_a_id:m.pair_b_id):'';
+function navbar(){const buttons=TABS.map(([k,t])=>`<button class="${state.tab===k?'active':''}" data-tab="${k}">${esc(t)}</button>`).join('');$('tabs').innerHTML=buttons;$('bottom').innerHTML=buttons;document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;render();window.scrollTo(0,0)})}
+function visibleMatches(){return state.matches.filter(m=>(state.category==='all'||m.category_id===state.category)&&(state.tournament==='all'||state.categories.find(c=>c.id===m.category_id)?.tournament_id===state.tournament))}
+function filteredCategories(){return state.categories.filter(c=>state.tournament==='all'||c.tournament_id===state.tournament)}
+function controls(){const cats=filteredCategories();return `<div class="filters"><div><label>大会</label><select class="field" id="tournamentFilter">${opt('all','すべて',state.tournament)}${state.tournaments.map(t=>opt(t.id,t.name,state.tournament)).join('')}</select></div><div><label>カテゴリー</label><select class="field" id="categoryFilter">${opt('all','すべて',state.category)}${cats.map(c=>opt(c.id,c.name,state.category)).join('')}</select></div></div>`}
+function wireControls(){const t=$('tournamentFilter'),c=$('categoryFilter');if(t)t.onchange=()=>{state.tournament=t.value;state.category='all';render()};if(c)c.onchange=()=>{state.category=c.value;render()}}
+function matchCard(m){const pending=!m.pair_a_id||!m.pair_b_id;const done=isDone(m);const walk=isWalkover(m);return `<article class="card match"><div class="row"><span class="stage">${esc(catName(m.category_id))} / ${esc(stageLabel(m))}${m.group_name?' / '+esc(m.group_name)+'組':''}</span><span class="status ${done||walk?'done':pending?'pending':''}">${walk?'不戦勝':done?'結果登録済':pending?'対戦相手未確定':m.status==='playing'?'試合中':'予定'}</span></div><div class="teams">${esc(pairName(m.pair_a_id))}<br><span class="muted">vs</span><br>${esc(pairName(m.pair_b_id))}</div>${walk?`<p class="prompt">不戦勝：${esc(winnerName(m))}</p>`:''}<div class="row"><small class="muted">${esc(timeOf(m))}　コート ${esc(courtName(m.court_id))}</small>${done?`<span class="score mono">${m.score_a} - ${m.score_b}</span>`:''}</div>${state.staff&&(!pending||walk)?`<div class="row" style="margin-top:10px"><span class="secondary-text">スタッフ操作</span><button class="btn secondary mini-btn" data-edit="${esc(m.id)}">${walk?'不戦勝を確認':done?'結果修正':'結果入力'}</button></div>`:''}</article>`}
+function home(){const ms=visibleMatches(),done=ms.filter(m=>isDone(m)||isWalkover(m)).length;return `${controls()}<h2>大会の状況</h2><div class="metrics"><div class="metric"><small>登録ペア</small><strong>${state.pairs.filter(p=>state.category==='all'||p.category_id===state.category).length}</strong></div><div class="metric"><small>登録試合</small><strong>${ms.length}</strong></div><div class="metric"><small>結果確定</small><strong>${done}</strong></div></div><div class="progress"><div style="width:${ms.length?100*done/ms.length:0}%"></div></div><div class="notice blue">この画面はSupabase共有データを表示します。結果入力はスタッフ認証後、サーバー側RPC経由で保存します。開発用のため実際の大会運営にはまだ使用しないでください。</div><h2>操作を始める</h2><div class="grid"><button class="btn" data-goto="courts">コート別を見る</button><button class="btn secondary" data-goto="matches">試合一覧を見る</button><button class="btn secondary" data-goto="bracket">決勝トーナメントを見る</button></div><h2>大会一覧</h2>${state.tournaments.map(t=>`<div class="card"><b>${esc(t.name)}</b><p class="secondary-text">カテゴリー：${state.categories.filter(c=>c.tournament_id===t.id).map(c=>esc(c.name)).join(' / ')||'未登録'}</p></div>`).join('')||'<div class="empty">大会データなし</div>'}`}
+function matches(){return `${controls()}<h2>試合一覧・結果入力</h2><p class="secondary-text">${visibleMatches().length} 試合</p><div class="grid">${visibleMatches().map(matchCard).join('')||'<div class="empty">該当試合がありません。</div>'}</div>`}
+function courts(){const ms=visibleMatches(),keys=[...new Set(ms.map(m=>m.court_id).filter(Boolean))];return `${controls()}<h2>コート別スケジュール</h2>${keys.map(k=>`<h2>${esc(courtName(k))}</h2><div class="grid">${ms.filter(m=>m.court_id===k).sort((a,b)=>timeOf(a).localeCompare(timeOf(b))).map(matchCard).join('')}</div>`).join('')||'<div class="empty">コート割当済みの試合はありません。</div>'}${ms.some(m=>!m.court_id)?`<h2>コート未割当</h2><div class="grid">${ms.filter(m=>!m.court_id).map(matchCard).join('')}</div>`:''}`}
+function slotDiagram(slots,cat,stage){
+  const ordered=[...slots].sort((a,b)=>a.round_number-b.round_number||a.match_number-b.match_number);
+  if(!ordered.length)return '<div class="empty">対戦枠がありません。</div>';
+  const byId=new Map(ordered.map(s=>[s.id,s]));
+  const matchById=new Map(state.matches.map(m=>[m.id,m]));
+  const highest=Math.max(...ordered.map(s=>s.round_number));
+  const first=ordered.filter(s=>s.round_number===1);
+  const center=new Map();
+  // Preserve bracket topology using each slot's actual next_slot_id.
+  first.forEach((s,i)=>center.set(s.id,75+i*135));
+  for(let round=2;round<=highest;round++){
+    ordered.filter(s=>s.round_number===round).forEach((s,i)=>{
+      const children=ordered.filter(x=>x.next_slot_id===s.id&&center.has(x.id));
+      if(children.length)center.set(s.id,children.reduce((a,x)=>a+center.get(x.id),0)/children.length);
+      else center.set(s.id,75+i*135*Math.pow(2,round-1));
+    });
+  }
+  const colWidth=234,cardWidth=194,cardHeight=94;
+  const boardWidth=highest*colWidth+12;
+  const boardHeight=Math.max(180,...[...center.values()].map(y=>y+cardHeight/2+18));
+  const path=ordered.filter(s=>s.next_slot_id&&byId.has(s.next_slot_id)).map(s=>{
+    const target=byId.get(s.next_slot_id),x1=12+(s.round_number-1)*colWidth+cardWidth,
+      x2=12+(target.round_number-1)*colWidth,
+      y1=center.get(s.id),y2=center.get(target.id),mid=(x1+x2)/2;
+    return `<path d="M ${x1} ${y1} H ${mid} V ${y2} H ${x2}" stroke="#90afb6" stroke-width="1.7" fill="none"/>`;
+  }).join('');
+  const cards=ordered.map(s=>{
+    const m=matchById.get(s.match_id),x=12+(s.round_number-1)*colWidth,y=center.get(s.id)-cardHeight/2;
+    if(!m)return `<div class="bracket-match" style="left:${x}px;top:${y}px"><small>試合情報を取得できません</small></div>`;
+    const winner=isWalkover(m)?m.walkover_winner_pair_id:isDone(m)?(m.score_a>m.score_b?m.pair_a_id:m.pair_b_id):null;
+    const line=(id,score)=>`<div class="bracket-team ${winner&&winner===id?'win':''}"><span title="${esc(pairName(id))}">${esc(pairName(id))}</span><b>${score??''}</b></div>`;
+    const label=s.round_number===highest?'決勝':s.round_number===highest-1?'準決勝':`${s.round_number}回戦`;
+    return `<div class="bracket-match ${s.round_number===highest&&winner?'final-winner':''}" style="left:${x}px;top:${y}px"><div class="bracket-head"><span>${esc(label)} ${s.match_number}</span><span>${isWalkover(m)?'不戦勝':isDone(m)?'終了':m.status==='playing'?'試合中':'予定'}</span></div>${line(m.pair_a_id,m.score_a)}${line(m.pair_b_id,m.score_b)}${state.staff&&m.pair_a_id&&m.pair_b_id?`<button class="btn secondary" data-edit="${esc(m.id)}">結果を操作</button>`:''}</div>`;
+  }).join('');
+  return `<div class="bracket-legend"><span>緑：勝者</span><span>線：次ラウンドへの接続</span><span>横スクロールで全ラウンド表示</span></div><div class="bracket-scroller"><div class="bracket-board" style="width:${boardWidth}px;height:${boardHeight}px"><svg class="bracket-lines" width="${boardWidth}" height="${boardHeight}" viewBox="0 0 ${boardWidth} ${boardHeight}" aria-hidden="true">${path}</svg>${cards}</div></div>`;
+}
+function championSummary(slots) {
+  if (!slots.length) return '';
+  const lastRound=Math.max(...slots.map(s=>Number(s.round_number)));
+  const finalSlots=slots.filter(s=>Number(s.round_number)===lastRound);
+  // Only a single final establishes one bracket champion; otherwise avoid false claims.
+  if (finalSlots.length!==1) return '';
+  const finalMatch=state.matches.find(m=>m.id===finalSlots[0].match_id);
+  if (!finalMatch) return '';
+  const winnerId=isWalkover(finalMatch)
+    ? finalMatch.walkover_winner_pair_id
+    : isDone(finalMatch)&&finalMatch.score_a!==finalMatch.score_b
+      ? (finalMatch.score_a>finalMatch.score_b?finalMatch.pair_a_id:finalMatch.pair_b_id)
+      : null;
+  const valid=winnerId&&(winnerId===finalMatch.pair_a_id||winnerId===finalMatch.pair_b_id);
+  if (!valid) return `<div class="champion-panel champion-pending" aria-label="優勝ペア未確定"><div class="champion-kicker">🏆 優勝ペア：未確定</div><p class="champion-caption">決勝戦の結果が保存されると、ここに勝者を表示します。</p></div>`;
+  const score=isWalkover(finalMatch)?'決勝：不戦勝':`決勝：${finalMatch.score_a} – ${finalMatch.score_b}`;
+  return `<div class="champion-panel" aria-label="決勝結果から算出した優勝ペア"><div class="champion-kicker">🏆 CHAMPION · 優勝ペア</div><div class="champion-name">${esc(pairName(winnerId))}</div><div class="champion-result">${esc(score)}</div><p class="champion-caption">決勝戦の保存結果から自動表示しています。大会の正式な結果承認・確定を示すものではありません。</p></div>`;
+}
+function bracket(){
+  const ms=visibleMatches().filter(m=>stageFor(m)?.stage_type==='knockout');
+  const byStage=[...new Set(ms.map(m=>m.stage_id))];
+  const diagrams=byStage.map(stageId=>{
+    const stage=state.stages.find(s=>s.id===stageId);
+    const slots=state.bracketSlots.filter(s=>s.stage_id===stageId);
+    return `<section class="bracket-stage"><h2>${esc(catName(stage?.category_id))} / ${esc(stage?.name||'決勝トーナメント')}</h2>${slots.length?championSummary(slots):''}${slots.length?slotDiagram(slots,stage?.category_id,stageId):`<div class="notice">対戦枠の読み取りができません。表示用RPCを設定するか「更新」を押してください。<br><small>${esc(state.bracketError)}</small></div><div class="grid">${ms.filter(m=>m.stage_id===stageId).map(matchCard).join('')}</div>`}</section>`;
+  }).join('');
+  return `${controls()}<h2>決勝トーナメント</h2><div class="notice blue">対戦表はSupabaseの確定データを表示します。変更後は「更新」を押してください。スタッフは対戦カードから結果を操作できます。</div>${diagrams||'<div class="empty">決勝トーナメントの試合はまだありません。</div>'}`;
+}
+function ranking(){const ms=visibleMatches().filter(m=>stageFor(m)?.stage_type==='preliminary');const cs=[...new Set(ms.map(m=>m.category_id))];return `${controls()}<h2>予選順位（暫定）</h2><div class="notice blue">この画面の順位は表示用の暫定集計です。正式順位・決勝進出者の確定には使用しないでください。V10の順位承認画面は別工程で追加します。</div>${cs.map(cat=>{const groups=[...new Set(ms.filter(m=>m.category_id===cat).map(m=>m.group_name||'なし'))];return `<h2>${esc(catName(cat))}</h2>${groups.map(group=>{let games=ms.filter(m=>m.category_id===cat&&(m.group_name||'なし')===group);let ids=[...new Set(games.flatMap(m=>[m.pair_a_id,m.pair_b_id]).filter(Boolean))];let table=ids.map(id=>({id,w:0,l:0,d:0,pts:0,played:0}));let idx=Object.fromEntries(table.map(x=>[x.id,x]));games.forEach(m=>{if(!isDone(m))return;let a=idx[m.pair_a_id],b=idx[m.pair_b_id];if(!a||!b)return;a.played++;b.played++;a.d+=m.score_a-m.score_b;b.d+=m.score_b-m.score_a;a.pts+=m.score_a;b.pts+=m.score_b;if(m.score_a>m.score_b){a.w++;b.l++}else{b.w++;a.l++}});table.sort((a,b)=>b.w-a.w||b.d-a.d||b.pts-a.pts||pairName(a.id).localeCompare(pairName(b.id)));return `<div class="card tablebox"><h3>${esc(group)}組</h3><table class="tbl"><thead><tr><th>仮順位</th><th>ペア</th><th>勝</th><th>負</th><th>得失点</th><th>試合</th></tr></thead><tbody>${table.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(pairName(x.id))}</td><td>${x.w}</td><td>${x.l}</td><td>${x.d}</td><td>${x.played}</td></tr>`).join('')}</tbody></table></div>`}).join('')}`}).join('')||'<div class="empty">予選試合がありません。</div>'}`}
+function pairs(){const ps=state.pairs.filter(p=>state.category==='all'||p.category_id===state.category).filter(p=>state.tournament==='all'||state.categories.find(c=>c.id===p.category_id)?.tournament_id===state.tournament);const selected=ps.find(p=>p.id===state.pair)||ps[0];return `${controls()}<h2>ペア別試合検索</h2><label>ペアを選択</label><select class="field" id="pairFilter">${ps.map(p=>opt(p.id,p.display_name,selected?.id)).join('')}</select>${selected?`<div class="card"><b>${esc(selected.display_name)}</b> <small class="muted">${esc(catName(selected.category_id))}</small></div><div class="grid">${visibleMatches().filter(m=>m.pair_a_id===selected.id||m.pair_b_id===selected.id).map(matchCard).join('')||'<div class="empty">試合がありません。</div>'}</div>`:'<div class="empty">ペアがありません。</div>'}`}
+function render(){navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':({home,matches,courts,bracket,ranking,pairs})[state.tab]();$('screen').innerHTML=top+content+'<footer>v10開発プレビュー｜V9画面デザインを踏襲</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));wireControls();let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
+async function fetchAll(name,columns='*',order='id'){let out=[],from=0;for(;;){let q=client.from(name).select(columns).range(from,from+499);if(order)q=q.order(order,{ascending:true});let {data,error}=await q;if(error)throw Error(name+' : '+error.message);out.push(...(data||[]));if(!data||data.length<500)break;from+=500;if(from>=10000)throw Error(name+' : 10000行超のため取得を停止しました')}return out}
+async function loadData(){if(!client){state.error='Supabaseに接続できません。公開用設定を確認してください。';render();return}state.loading=true;state.error='';render();try{let [t,c,s,p,m]=await Promise.all([fetchAll('tournaments'),fetchAll('categories'),fetchAll('competition_stages'),fetchAll('pairs'),fetchAll('matches')]);state.tournaments=t;state.categories=c;state.stages=s;state.pairs=p;state.matches=m;state.bracketSlots=[];state.bracketError='';const slotResult=await client.rpc('get_public_knockout_bracket_slots');if(slotResult.error){state.bracketError=slotResult.error.message}else{state.bracketSlots=slotResult.data||[]}const courtResult=await client.from('courts').select('id,name').limit(100);state.courts=courtResult.error?[]:courtResult.data||[];state.lastLoaded=new Date()}catch(e){state.error='データ取得に失敗しました：'+e.message}finally{state.loading=false;render()}}
+function closeModal(){ $('overlay').innerHTML='' }
+function modal(inner){$('overlay').innerHTML=`<div class="modalback" id="modalback"><div class="modal">${inner}</div></div>`;$('modalback').onclick=e=>{if(e.target.id==='modalback')closeModal()};document.querySelectorAll('[data-close]').forEach(x=>x.onclick=closeModal)}
+function loginModal(){modal(`<div class="row"><h2 style="margin:0">スタッフログイン</h2><button class="btn secondary mini-btn" data-close>閉じる</button></div><label>メールアドレス</label><input class="field" id="email" type="email" autocomplete="username"><label>パスワード</label><input class="field" id="password" type="password" autocomplete="current-password"><p class="prompt">V10テスト画面と同じメールアドレス・パスワードを使用します。</p><p id="authMsg" class="prompt" role="status"></p><button class="btn wide" id="signIn">ログイン</button>`);$('signIn').onclick=async()=>{let b=$('signIn');b.disabled=true;try{let {error}=await client.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});$('password').value='';if(error)throw error;closeModal();await refreshAuth();await loadData()}catch(e){$('authMsg').textContent='ログインできません：'+e.message}finally{if(b.isConnected)b.disabled=false}}}
+async function refreshAuth(){if(!client)return;const {data,error}=await client.auth.getUser();state.auth=error?null:data.user||null;state.staff=false;state.staffError='';if(state.auth){let {data:role,error:re}=await client.from('staff_users').select('user_id').eq('user_id',state.auth.id).eq('is_active',true).maybeSingle();state.staff=!re&&!!role;state.staffError=re?.message||''}render()}
+async function signOut(){if(!client)return;let {error}=await client.auth.signOut();if(error){alert(error.message);return}state.auth=null;state.staff=false;render();await loadData()}
+function editScore(id){if(!state.staff){alert('スタッフ認証が必要です。');return}const m=state.matches.find(x=>x.id===id);if(!m)return;const unresolved=!m.pair_a_id||!m.pair_b_id;const walk=isWalkover(m);modal(`<div class="row"><h2 style="margin:0">試合結果・不戦勝</h2><button class="btn secondary mini-btn" data-close>閉じる</button></div><p class="prompt">${esc(catName(m.category_id))} / ${esc(stageLabel(m))}</p><p><b>${esc(pairName(m.pair_a_id))}</b> vs <b>${esc(pairName(m.pair_b_id))}</b></p><p class="prompt">現在：${walk?'不戦勝（'+esc(winnerName(m))+'）':isDone(m)?m.score_a+' - '+m.score_b:esc(m.status)}</p>${unresolved?'<div class="notice">対戦相手が未確定のため結果を保存できません。</div>':''}<div class="scoreinputs"><div><label>${esc(pairName(m.pair_a_id))}</label><input class="field" id="scoreA" type="number" inputmode="numeric" min="0" max="99" value="${m.score_a??''}"></div><div><label>${esc(pairName(m.pair_b_id))}</label><input class="field" id="scoreB" type="number" inputmode="numeric" min="0" max="99" value="${m.score_b??''}"></div></div><p class="prompt">最終得点を入力。後続の試合開始後は勝者変更できません。</p><p id="editMsg" class="empty-error hide" role="alert"></p><div class="modal-actions"><button class="btn" id="saveScore" ${unresolved||walk?'disabled':''}>結果を保存</button><button class="btn secondary" id="confirmWalkover" ${unresolved||isDone(m)||m.status==='playing'||m.status==='cancelled'?'disabled':''}>不戦勝を確定・訂正</button>${walk?'<button class="btn secondary" id="revokeWalkover">不戦勝を取り消す</button>':''}</div>`);
+const act=async (fn,args,msg)=>{const buttons=[...$('overlay').querySelectorAll('button')];buttons.forEach(x=>x.disabled=true);try{if(!confirm(msg)){buttons.forEach(x=>x.disabled=false);return}let {error}=await client.rpc(fn,args);if(error)throw error;closeModal();await loadData();alert('保存しました。最新データを取得しました。')}catch(e){let el=$('editMsg');if(el){el.textContent='操作できませんでした：'+e.message+'。更新してからやり直してください。';el.classList.remove('hide')}buttons.forEach(x=>x.disabled=false)}};
+$('saveScore').onclick=()=>{const aa=$('scoreA').value.trim(),bb=$('scoreB').value.trim(),a=Number(aa),b=Number(bb);if(!aa||!bb||!Number.isInteger(a)||!Number.isInteger(b)||a<0||b<0||a>99||b>99||a===b){let e=$('editMsg');e.textContent='0〜99の異なる整数を入力してください。';e.classList.remove('hide');return}act('staff_save_score',{p_match_id:m.id,p_score_a:a,p_score_b:b,p_expected_updated_at:m.updated_at},'スコアを '+a+' - '+b+' で保存しますか？')};
+if($('confirmWalkover'))$('confirmWalkover').onclick=()=>{let value=prompt('不戦勝の勝者を選んでください。\nA: '+pairName(m.pair_a_id)+'\nB: '+pairName(m.pair_b_id)+'\nA または B を入力');if(value===null)return;value=value.trim().toUpperCase();if(value!=='A'&&value!=='B'){alert('A または B を入力してください');return}const reason=prompt('不戦勝の理由を入力してください（必須）');if(!reason?.trim()){alert('理由が必要です');return}act('staff_confirm_walkover',{p_match_id:m.id,p_winner_pair_id:value==='A'?m.pair_a_id:m.pair_b_id,p_expected_updated_at:m.updated_at,p_reason:reason.trim()},'指定した勝者で不戦勝を確定しますか？')};
+if($('revokeWalkover'))$('revokeWalkover').onclick=()=>{const reason=prompt('不戦勝取消の理由を入力してください（必須）');if(!reason?.trim()){alert('理由が必要です');return}act('staff_revoke_walkover',{p_match_id:m.id,p_expected_updated_at:m.updated_at,p_reason:reason.trim()},'不戦勝を取り消しますか？')};
+}
+if(client){client.auth.onAuthStateChange(()=>setTimeout(refreshAuth,0));refreshAuth().then(loadData)}else render();
+</script></body></html>
