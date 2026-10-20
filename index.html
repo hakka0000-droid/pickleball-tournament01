@@ -751,7 +751,7 @@ function pairImportCheck(){
       if(batch.has(key))errors.push('ファイル内に同じペアがあります（順不同）');
       batch.add(key);
       if((existingByCat.get(cat.id)||[]).some(p=>normalizePairKey(p.player1,p.player2)===normalizePairKey(p1,p2)))errors.push('DBに登録済みのペアです（辞退・失格を含む）');
-      if(state.matches.some(m=>m.category_id===cat.id)||state.approved.some(a=>a.category_id===cat.id)||state.qualificationLocks.includes(cat.id)||state.officialResults.some(r=>r.category_id===cat.id))errors.push('試合・承認・確定済みのデータがあるカテゴリーです');
+      if(state.matches.some(m=>m.category_id===cat.id)||state.approved.some(a=>a.category_id===cat.id)||state.qualificationLocks.includes(cat.id)||state.officialResults.some(r=>r.category_id===cat.id&&['confirmed','revoked'].includes(r.status)))errors.push('試合・承認・確定済みのデータがあるカテゴリーです');
     }
     prepared.push({line:row.line,category:cname,categoryId:cat?.id,player1:p1,player2:p2,female:femaleRaw,errors});
   }
