@@ -125,6 +125,9 @@ function getCapacityPlan(tournamentId,categoryId){
 }
 // Scenario calculation is local-only. Display the latest of four hypothetical outcomes;
 // never claim all real winners or double-entries have been validated.
+const EVENT_PREP_MINUTES=90; // setup 30 + reception/warmup 45 + opening 15
+const EVENT_CLOSE_MINUTES=60; // closing ceremony and cleanup
+const EVENT_RESERVED_MINUTES=EVENT_PREP_MINUTES+EVENT_CLOSE_MINUTES;
 const planningSimulation={qualificationMinutes:15};
 
 // STEP 171: final-stage format selectable per category; local-only provisional search. Never writes to Supabase.
@@ -138,8 +141,8 @@ function calculateRecruitmentSuggestion(t,categories,courtCount,buffer){
  if(!t||!categories.length||categories.length>8)throw Error('対象カテゴリー数は1〜8件で設定してください。');
  const clock=v=>{const v0=String(v||'').slice(0,5);if(!/^\d\d:\d\d$/.test(v0))throw Error('開催時刻が未設定です');const [h,m]=v0.split(':').map(Number);if(h>23||m>59)throw Error('開催時刻が不正です');return h*60+m};
  const start=clock(t.start_time),end=clock(t.end_time),match=Number(t.match_minutes),rest=Number(t.minimum_rest_minutes??0),consecutive=Number(t.max_consecutive_matches??2);
- if(start>=end||!Number.isInteger(match)||match<1||!Number.isInteger(courtCount)||courtCount<1||!Number.isInteger(buffer)||buffer<0||end-120-buffer<=start)throw Error('開催時間・コート・余裕時間を見直してください。');
- const theoretical=courtCount*Math.floor(Math.max(0,end-start-120-buffer)/match);
+ if(start>=end||!Number.isInteger(match)||match<1||!Number.isInteger(courtCount)||courtCount<1||!Number.isInteger(buffer)||buffer<0||end-EVENT_CLOSE_MINUTES-buffer<=start+EVENT_PREP_MINUTES)throw Error('開催時間・コート・余裕時間を見直してください。');
+ const theoretical=courtCount*Math.floor(Math.max(0,end-start-EVENT_RESERVED_MINUTES-buffer)/match);
  const all=categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return recruitmentCandidateCounts(Number(p.groupSize),Number(p.advance),p.finalFormat||'knockout')});
  if(all.some(x=>!x.length))return {status:'no_candidates',trials:0};
  // Beam search bounds both runtime and memory as category count increases.
@@ -161,11 +164,11 @@ function calculateRecruitmentSuggestion(t,categories,courtCount,buffer){
  for(const suggestion of beam.slice(0,120)){
   trials++;
   const plans=categories.map((c,i)=>{const p=getCapacityPlan(t.id,c.id);return {name:c.name,pairs:suggestion.items[i].pairs,groupMax:Number(p.groupSize),advance:Number(p.advance),finalFormat:p.finalFormat||'knockout'}});
-  const r=v10ScheduleEngine.simulate({start:String(t.start_time).slice(0,5),end:effectiveEnd,reservedMinutes:120,matchMinutes:match,restMinutes:rest,maxConsecutive:consecutive,courts:courtCount,qualificationMinutes:planningSimulation.qualificationMinutes,categories:plans,scenarios:4});
+  const r=v10ScheduleEngine.simulate({start:minuteClock(start+EVENT_PREP_MINUTES),end:effectiveEnd,reservedMinutes:EVENT_CLOSE_MINUTES,matchMinutes:match,restMinutes:rest,maxConsecutive:consecutive,courts:courtCount,qualificationMinutes:planningSimulation.qualificationMinutes,categories:plans,scenarios:4});
   if(r.status==='fits_all_tested_scenarios'){
    const worst=Math.max(...r.runs.map(v=>v.finishMinute));
    const fmt=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
-   return {status:'provisional_fit',suggestions:categories.map((c,i)=>({id:c.id,name:c.name,...suggestion.items[i]})),totalPairs:suggestion.pairs,totalMatches:suggestion.matches,theoretical,finish:fmt(worst),deadline:fmt(end-120-buffer),remaining:end-120-buffer-worst,trials};
+   return {status:'provisional_fit',suggestions:categories.map((c,i)=>({id:c.id,name:c.name,...suggestion.items[i]})),totalPairs:suggestion.pairs,totalMatches:suggestion.matches,theoretical,finish:fmt(worst),deadline:fmt(end-EVENT_CLOSE_MINUTES-buffer),remaining:end-EVENT_CLOSE_MINUTES-buffer-worst,trials};
   }
  }
  return {status:'no_fit_found',trials,examined:beam.length};
@@ -178,7 +181,7 @@ function recruitmentOptimizationSection(t,categories,courts,availableSlots){
  const windowsActive=categories.some(c=>{const d=getWindowDraft(t.id,c);return !!(d.start||d.end);});
  const ready=!windowsActive&&availableSlots!==null&&courts>0&&t.start_time&&t.end_time;
  const report=!result?'':result.status==='provisional_fit'?`<div class="notice blue">仮の勝敗4パターンで配置できた暫定案です。最適解の保証はありません。</div><div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>提案募集ペア数</th><th>予選構成</th><th>必要試合数</th></tr></thead><tbody>${result.suggestions.map(x=>`<tr><td>${esc(x.name)}</td><td><b>${x.pairs}ペア</b></td><td>${esc(x.groupSizes.join('・'))}</td><td>${x.total}試合</td></tr>`).join('')}</tbody></table></div><div class="metrics"><div class="metric"><small>合計募集数</small><strong>${result.totalPairs}ペア</strong></div><div class="metric"><small>必要試合数</small><strong>${result.totalMatches}試合</strong></div><div class="metric"><small>仮の終了時刻</small><strong>${esc(result.finish)}</strong></div></div><p class="prompt">余裕時間を含めた終了期限：${esc(result.deadline)} ／ 残り：${result.remaining}分 ／ 検証候補：${result.trials}件</p><button class="btn wide" id="applyRecruitmentSuggestion">この提案をシミュレーションへ反映</button>`:`<div class="notice">${result.status==='no_candidates'?'予選グループ・理論収容力に収まる募集枠候補がありません。':'探索した候補では時間内の仮配置を確認できませんでした。開催不可能という意味ではありません。'} （検証：${result.trials}件）</div>`;
- return `<h2>募集枠の自動提案</h2><div class="card stack"><p class="prompt">各カテゴリーの予選グループ人数・進出条件を維持し、募集ペア数を暫定提案します。公平性のためカテゴリー間の募集数差を最大8ペアに制限します。</p><div><label for="recruitmentBuffer">公式戦終了期限まで確保したい余裕（分）</label><select class="field" id="recruitmentBuffer">${choices.map(n=>opt(String(n),`${n}分`,String(current.bufferMinutes))).join('')}</select></div><button class="btn wide" id="optimizeRecruitment" ${ready&&!current.busy?'':'disabled'}>${current.busy?'計算中…':'募集枠を自動提案'}</button>${windowsActive?'<p class="notice">カテゴリー別開催枠が設定されています。旧方式の募集枠自動提案は開催枠を考慮しないため停止しています。</p>':!ready?'<p class="notice">開催時間と公式戦用コートの登録が必要です。</p>':''}${report}<p class="prompt">候補ペア数：4・6・8・10・12・16・20・24・32・40・48・56・64。最大1,600候補を段階的に保持し、仮スケジュールを最大120候補×4パターン検証します。探索のため最大募集数は保証しません。余裕時間は従来の運営用120分とは別枠です。ダブルエントリー未反映。提案・シミュレーションへの反映だけではSupabaseに保存されません。保存するには各カテゴリーの保存ボタンを押してください。</p></div>`;
+ return `<h2>募集枠の自動提案</h2><div class="card stack"><p class="prompt">各カテゴリーの予選グループ人数・進出条件を維持し、募集ペア数を暫定提案します。公平性のためカテゴリー間の募集数差を最大8ペアに制限します。</p><div><label for="recruitmentBuffer">公式戦終了期限まで確保したい余裕（分）</label><select class="field" id="recruitmentBuffer">${choices.map(n=>opt(String(n),`${n}分`,String(current.bufferMinutes))).join('')}</select></div><button class="btn wide" id="optimizeRecruitment" ${ready&&!current.busy?'':'disabled'}>${current.busy?'計算中…':'募集枠を自動提案'}</button>${windowsActive?'<p class="notice">カテゴリー別開催枠が設定されています。旧方式の募集枠自動提案は開催枠を考慮しないため停止しています。</p>':!ready?'<p class="notice">開催時間と公式戦用コートの登録が必要です。</p>':''}${report}<p class="prompt">候補ペア数：4・6・8・10・12・16・20・24・32・40・48・56・64。最大1,600候補を段階的に保持し、仮スケジュールを最大120候補×4パターン検証します。探索のため最大募集数は保証しません。余裕時間は運営用150分とは別枠です。ダブルエントリー未反映。提案・シミュレーションへの反映だけではSupabaseに保存されません。保存するには各カテゴリーの保存ボタンを押してください。</p></div>`;
 }
 function optimizeRecruitmentClick(){
  if(recruitmentOptimization.busy)return;
@@ -237,8 +240,9 @@ function scheduleWindowValues(c){return {start:c.schedule_start_time?.slice(0,5)
 function getWindowDraft(t,c){const key=windowKey(t,c.id);return scheduleWindowDrafts[key]||(scheduleWindowDrafts[key]=scheduleWindowValues(c));}
 function hydrateScheduleWindows(categories){for(const c of categories){const key=windowKey(c.tournament_id,c.id);if(!scheduleWindowDirty.has(key)&&!scheduleWindowBusy.has(key))scheduleWindowDrafts[key]=scheduleWindowValues(c);}}
 function editScheduleWindow(t,c,f,v){const key=windowKey(t,c);const cat=state.categories.find(x=>x.id===c&&x.tournament_id===t);if(!cat)return;getWindowDraft(t,cat)[f]=v;const now=getWindowDraft(t,cat),saved=scheduleWindowValues(cat);if(Object.keys(now).every(k=>now[k]===saved[k]))scheduleWindowDirty.delete(key);else scheduleWindowDirty.add(key);delete scheduleWindowMessages[key];}
+function minuteClock(m){return Number.isInteger(m)&&m>=0&&m<1440?String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'):null;}
 function parseWindowMinute(value){if(!/^\d{2}:\d{2}$/.test(value||''))return null;const [h,m]=value.split(':').map(Number);return h<24&&m<60?h*60+m:null;}
-function validateWindowDraft(t,c,d,available){const s=parseWindowMinute(d.start),e=parseWindowMinute(d.end),ts=parseWindowMinute(t?.start_time?.slice(0,5)),te=parseWindowMinute(t?.end_time?.slice(0,5));const preferred=d.preferred===''?null:Number(d.preferred),max=d.max===''?null:Number(d.max);if(s===null||e===null||s>=e)return '開始・終了時刻を正しく指定してください。';if(ts===null||te===null||s<ts||e>te)return '大会開催時間内で指定してください。';if(!Number.isInteger(available)||available<1)return '利用可能な公式コートがありません。';if(preferred!==null&&(!Number.isInteger(preferred)||preferred<1||preferred>available))return '希望面数は1〜公式コート数の整数で指定してください。';if(max!==null&&(!Number.isInteger(max)||max<1||max>available))return '最大面数は1〜公式コート数の整数で指定してください。';if(preferred!==null&&max!==null&&preferred>max)return '希望面数は最大面数以下にしてください。';return null;}
+function validateWindowDraft(t,c,d,available){const s=parseWindowMinute(d.start),e=parseWindowMinute(d.end),eventStart=parseWindowMinute(t?.start_time?.slice(0,5)),eventEnd=parseWindowMinute(t?.end_time?.slice(0,5)),ts=eventStart===null?null:eventStart+EVENT_PREP_MINUTES,te=eventEnd===null?null:eventEnd-EVENT_CLOSE_MINUTES;const preferred=d.preferred===''?null:Number(d.preferred),max=d.max===''?null:Number(d.max);if(s===null||e===null||s>=e)return '開始・終了時刻を正しく指定してください。';if(ts===null||te===null||s<ts||e>te)return '大会開催時間内で指定してください。';if(!Number.isInteger(available)||available<1)return '利用可能な公式コートがありません。';if(preferred!==null&&(!Number.isInteger(preferred)||preferred<1||preferred>available))return '希望面数は1〜公式コート数の整数で指定してください。';if(max!==null&&(!Number.isInteger(max)||max<1||max>available))return '最大面数は1〜公式コート数の整数で指定してください。';if(preferred!==null&&max!==null&&preferred>max)return '希望面数は最大面数以下にしてください。';return null;}
 async function saveScheduleWindow(categoryId){
  const tid=categoryForm.tournamentId,key=windowKey(tid,categoryId),t=state.tournaments.find(x=>x.id===tid),c=state.categories.find(x=>x.id===categoryId&&x.tournament_id===tid);
  if(!client||!c||!t||t.status!=='draft'||!canManageCategories()||!state.tournamentAdminIds.includes(tid)||scheduleWindowBusy.has(key))return;
@@ -263,15 +267,15 @@ function categoryScheduleWindowsSection(t,categories,officialCount){if(!t||!cate
  return `<h2>カテゴリー別開催時間枠・可変コート</h2><div class="notice blue">同じ時間帯に複数カテゴリーを設定できます。希望面数は優先目標、最大面数は上限です。公式コートは大会全体で共有し、時間帯ごとに空き面を配分します。<b>シミュレーションは入力中の値、DB保存は各保存ボタンを押した値です。</b></div>${cards.join('')}`;
 }
 function simulateFlexibleSchedule(t,categories,courtCount,qualificationMinutes,scenario){
- const begin=parseWindowMinute(t.start_time?.slice(0,5)),eventEnd=parseWindowMinute(t.end_time?.slice(0,5)),matchMinutes=Number(t.match_minutes),rest=Number(t.minimum_rest_minutes||0),maxStreak=Number(t.max_consecutive_matches||2);
- if(begin===null||eventEnd===null||eventEnd-begin<=120||!Number.isInteger(matchMinutes)||matchMinutes<1||courtCount<1)throw Error('大会の時間・コート設定が不正です');
- // 120 minutes reserved at the end, consistently with the existing preview.
- const deadline=eventEnd-120;
+ const eventStart=parseWindowMinute(t.start_time?.slice(0,5)),begin=eventStart===null?null:eventStart+EVENT_PREP_MINUTES,eventEnd=parseWindowMinute(t.end_time?.slice(0,5)),matchMinutes=Number(t.match_minutes),rest=Number(t.minimum_rest_minutes||0),maxStreak=Number(t.max_consecutive_matches||2);
+ if(begin===null||eventEnd===null||eventEnd-begin<=EVENT_CLOSE_MINUTES||!Number.isInteger(matchMinutes)||matchMinutes<1||courtCount<1)throw Error('大会の時間・コート設定が不正です');
+ // The first 90 minutes and the last 60 minutes are reserved.
+ const deadline=eventEnd-EVENT_CLOSE_MINUTES;
  const built=categories.map((c,i)=>{
   const d=getWindowDraft(t.id,c),err=validateWindowDraft(t,c,d,courtCount);if(err)throw Error(c.name+'：'+err);
   const p=getCapacityPlan(t.id,c.id),source={name:c.name,pairs:Number(p.pairs),groupMax:Number(p.groupSize),advance:Number(p.advance),finalFormat:p.finalFormat||'knockout'};
   const b=v10ScheduleEngine.buildCategoryPreview(source,i,scenario);if(b.error)throw Error(c.name+'：'+b.error);
-  const start=parseWindowMinute(d.start),end=Math.min(parseWindowMinute(d.end),deadline);
+  const start=Math.max(begin,parseWindowMinute(d.start)),end=Math.min(parseWindowMinute(d.end),deadline);
   return {id:c.id,name:c.name,start,end,max:d.max===''?courtCount:Number(d.max),preferred:d.preferred===''?null:Number(d.preferred),prelim:b.prelim,finals:b.knockouts,round:0,prelimEnd:null,roundEnd:null,pending:b.prelim.slice(),finished:b.prelim.length===0};
  });
  const schedule=[],lastEnd=new Map(),lastStart=new Map(),streak=new Map(),usage=new Map();
@@ -317,9 +321,9 @@ function simulateFlexibleSchedule(t,categories,courtCount,qualificationMinutes,s
 // STEP 21-13: independent audit of every provisional scenario and time slot.
 // This view does not represent a saved/official schedule.
 function auditFlexibleSchedule(run,t,categories,courtCount){
- const limit=parseWindowMinute(t.end_time?.slice(0,5))-120;
+ const limit=parseWindowMinute(t.end_time?.slice(0,5))-EVENT_CLOSE_MINUTES;
  const duration=Number(t.match_minutes);
- const byId=new Map(categories.map(c=>{const d=getWindowDraft(t.id,c);return [c.id,{start:parseWindowMinute(d.start),end:Math.min(parseWindowMinute(d.end),limit),max:d.max===''?courtCount:Number(d.max)}];}));
+ const byId=new Map(categories.map(c=>{const d=getWindowDraft(t.id,c);return [c.id,{start:Math.max(parseWindowMinute(t.start_time?.slice(0,5))+EVENT_PREP_MINUTES,parseWindowMinute(d.start)),end:Math.min(parseWindowMinute(d.end),limit),max:d.max===''?courtCount:Number(d.max)}];}));
  const byTime=new Map(),errors=[];
  for(const match of run.schedule){
   const w=byId.get(match.categoryId);
@@ -363,7 +367,7 @@ function flexibleSchedulePlanningSection(t,categories,courtCount){
   const main=runs[0],rows=main.summaries.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(fmt(s.windowStart))}〜${esc(fmt(s.windowEnd))}</td><td>${s.scheduled} / ${s.total}</td><td>${s.maxUsed}面</td></tr>`).join('');
   content=`<div class="notice ${pass===4?'blue':''}">${pass===4?'仮の勝敗4パターンで全試合を開催枠内に配置できました。':`仮の勝敗4パターン中 ${pass} パターンで全試合配置できました。未配置は不可能の証明ではありません。`}</div><div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>有効開催枠</th><th>配置済／必要</th><th>最大同時使用面数（ケース1）</th></tr></thead><tbody>${rows}</tbody></table></div><p class="prompt">ケース別：${runs.map((r,i)=>`ケース${i+1} ${r.scheduled}/${r.total}試合・${fmt(r.finishMinute)}終了`).join(' ／ ')}</p>${flexibleCourtAuditSection(t,categories,courtCount,runs)}`;
  }catch(e){content=`<div class="notice">カテゴリー開催枠または募集計画を確認してください：${esc(e.message)}</div>`;}
- return `<h2>カテゴリー別・共有コート可変割当の仮検証</h2><div class="card stack"><div><label for="qualificationMinutes">カテゴリーごとの予選終了〜決勝開始までの確認時間</label><select class="field" id="qualificationMinutes">${[0,10,15,20,30,45,60].map(n=>opt(String(n),`${n}分`,String(planningSimulation.qualificationMinutes))).join('')}</select></div>${content}<p class="prompt">開催枠は画面の入力値を使います（未保存も含む）。カテゴリーごとに予選→確認→決勝を進め、公式戦用コートを時間帯単位で可変配分します。大会終了前120分は運営用に確保する仮定です。貪欲法の簡易探索・仮勝敗のため実施可能性の保証ではありません。個別選手の重複申込、実試合の結果確定、進行遅延は未反映です。DBの対戦表・時間割は変更しません。</p></div>`;
+ return `<h2>カテゴリー別・共有コート可変割当の仮検証</h2><div class="card stack"><div><label for="qualificationMinutes">カテゴリーごとの予選終了〜決勝開始までの確認時間</label><select class="field" id="qualificationMinutes">${[0,10,15,20,30,45,60].map(n=>opt(String(n),`${n}分`,String(planningSimulation.qualificationMinutes))).join('')}</select></div>${content}<p class="prompt">開催枠は画面の入力値を使います（未保存も含む）。カテゴリーごとに予選→確認→決勝を進め、公式戦用コートを時間帯単位で可変配分します。大会開始後90分は準備、終了前60分は閉会式・撤収のため確保します。貪欲法の簡易探索・仮勝敗のため実施可能性の保証ではありません。個別選手の重複申込、実試合の結果確定、進行遅延は未反映です。DBの対戦表・時間割は変更しません。</p></div>`;
 }
 // STEP 175: conservative per-category lower bounds for the final stage.
 // These are necessary-time checks, not a proof that a full schedule fits.
@@ -396,7 +400,7 @@ function finalStageTimeDiagnostics(categories,run,matchMinutes,restMinutes,maxCo
 function schedulePlanningSection(t,categories,officialCourtCount,ready){
  if(!t||!categories.length)return '';
  const validPlans=categories.map(c=>{const p=getCapacityPlan(t.id,c.id),r=planGroupings(p.pairs,p.advance,p.groupSize,p.finalFormat||'knockout');return r?{name:c.name,pairs:Number(p.pairs),groupMax:Number(p.groupSize),advance:Number(p.advance),finalFormat:p.finalFormat||'knockout'}:null});
- const start=t.start_time?.slice(0,5),end=t.end_time?.slice(0,5),minutes=Number(t.match_minutes);
+ const rawStart=t.start_time?.slice(0,5),start=rawStart?minuteClock(parseWindowMinute(rawStart)+EVENT_PREP_MINUTES):null,end=t.end_time?.slice(0,5),minutes=Number(t.match_minutes);
  const rest=Number(t.minimum_rest_minutes??0),maxConsecutive=Number(t.max_consecutive_matches??2);
  const qualificationMinutes=planningSimulation.qualificationMinutes;
  const cfg=validPlans.every(Boolean)&&ready&&start&&end&&minutes>0&&officialCourtCount>0;
@@ -404,7 +408,7 @@ function schedulePlanningSection(t,categories,officialCourtCount,ready){
  if(!cfg){output='<div class="notice">カテゴリー構成・開催時間・有効な公式戦コートを設定すると、予定時刻を試算できます。</div>';}
  else{
   try{
-   const calc=v10ScheduleEngine.simulate({start,end,reservedMinutes:120,matchMinutes:minutes,restMinutes:rest,maxConsecutive,courts:officialCourtCount,qualificationMinutes,categories:validPlans,scenarios:4});
+   const calc=v10ScheduleEngine.simulate({start,end,reservedMinutes:EVENT_CLOSE_MINUTES,matchMinutes:minutes,restMinutes:rest,maxConsecutive,courts:officialCourtCount,qualificationMinutes,categories:validPlans,scenarios:4});
    const runs=calc.runs;
    const fmt=m=>Number.isFinite(m)?`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`:'—';
    const fullyScheduled=runs.filter(r=>r.status==='fits_scenario');
@@ -416,7 +420,7 @@ function schedulePlanningSection(t,categories,officialCourtCount,ready){
    output=`<div class="notice ${complete?'blue':''}"><b>${esc(message)}</b></div>${timing}<p class="prompt">パターン別：${runs.map((r,i)=>`ケース${i+1} ${r.status==='fits_scenario'?fmt(r.finishMinute):'未配置 '+esc(r.unscheduled??'?')+'試合'}`).join(' ／ ')}</p>${finalStageTimeDiagnostics(validPlans,runs.find(r=>Number.isFinite(r.preliminaryEndMinute)),minutes,rest,maxConsecutive)}`;
   }catch(err){output=`<div class="empty-error">シミュレーションできません：${esc(err.message)}</div>`;}
  }
- return `<h2>仮スケジュールの実現性チェック</h2><div class="card stack"><div><label for="qualificationMinutes">予選終了から決勝開始までの確認時間（分）</label><select class="field" id="qualificationMinutes">${[0,10,15,20,30,45,60].map(n=>opt(String(n),`${n}分`,String(qualificationMinutes))).join('')}</select></div><p class="prompt">休憩 ${esc(rest)}分、最大連続試合 ${esc(maxConsecutive)}試合、公式戦コート ${esc(officialCourtCount)}面。運営用の120分は大会終了時刻側に確保する仮定です。</p>${output}<p class="prompt">これは募集段階の仮ペアと仮の勝敗による4パターンの試算です。全パターンの保証ではありません。ダブルエントリー、進行遅延は未反映。配置は簡易探索のため、未配置でも開催不可能とは限りません。Supabaseへの保存はありません。</p></div>`;
+ return `<h2>仮スケジュールの実現性チェック</h2><div class="card stack"><div><label for="qualificationMinutes">予選終了から決勝開始までの確認時間（分）</label><select class="field" id="qualificationMinutes">${[0,10,15,20,30,45,60].map(n=>opt(String(n),`${n}分`,String(qualificationMinutes))).join('')}</select></div><p class="prompt">休憩 ${esc(rest)}分、最大連続試合 ${esc(maxConsecutive)}試合、公式戦コート ${esc(officialCourtCount)}面。開始後90分と終了前60分を運営用に確保します。</p>${output}<p class="prompt">これは募集段階の仮ペアと仮の勝敗による4パターンの試算です。全パターンの保証ではありません。ダブルエントリー、進行遅延は未反映。配置は簡易探索のため、未配置でも開催不可能とは限りません。Supabaseへの保存はありません。</p></div>`;
 }
 function capacityPlanningSection(t,categories,availableSlots){
  if(!t)return '';
@@ -436,7 +440,7 @@ function capacityPlanningSection(t,categories,availableSlots){
  const ready=availableSlots!==null&&Number.isFinite(availableSlots);
  const ratio=valid&&ready&&availableSlots>0?required/availableSlots*100:null;
  const summary=categories.length===0?'<div class="notice">募集枠を試算するには、先にカテゴリーを追加してください。</div>':!valid?'<div class="notice">入力値に不備があります。すべてのカテゴリーの募集ペア数を確認してください。</div>':!ready?'<div class="notice">収容力を比較するには開催時間と公式戦用コートを設定・取得してください。</div>':`<div class="metrics"><div class="metric"><small>必要試合数</small><strong>${required}</strong></div><div class="metric"><small>理論試合枠</small><strong>${availableSlots}</strong></div><div class="metric"><small>残り枠（概算）</small><strong>${availableSlots-required}</strong></div></div>${ratio===null?'<div class="notice">理論上の試合枠が0です。</div>':`<div class="progress"><div style="width:${Math.min(100,ratio)}%;background:${ratio>100?'#bb5949':'#219a7b'}"></div></div><p class="prompt">理論枠使用率：${ratio.toFixed(1)}%</p>`}<div class="notice ${required>availableSlots?'':'blue'}">${required>availableSlots?'必要試合数が理論枠を超えています。':'試合数は理論枠内ですが、時間内に終了できる保証はありません。'}</div>`;
- return `<h2>大会全体の募集枠シミュレーション</h2><div class="notice blue">カテゴリーごとに募集ペア数と進出条件を設定し、予選・決勝の必要試合数を比較します。<b>変更は各カテゴリーの「募集枠を保存」を押すまで保存されません。</b> 予選は各カテゴリーで選んだ最大3〜6ペアを上限に、全組3ペア以上で均等配分した1回総当たりです。決勝はカテゴリーごとにシングルエリミネーション（BYEは試合数に含めません）または1回総当たりを選択できます。</div>${cards.join('')}${summary}<p class="prompt">開催時間から設営・受付・表彰・撤収の120分を控除済みです。3位決定戦、休憩、連戦制限、ダブルエントリー、予選と決勝の進行待ちは未反映です。募集枠の確定には別途スケジュール検証が必要です。</p>`;
+ return `<h2>大会全体の募集枠シミュレーション</h2><div class="notice blue">カテゴリーごとに募集ペア数と進出条件を設定し、予選・決勝の必要試合数を比較します。<b>変更は各カテゴリーの「募集枠を保存」を押すまで保存されません。</b> 予選は各カテゴリーで選んだ最大3〜6ペアを上限に、全組3ペア以上で均等配分した1回総当たりです。決勝はカテゴリーごとにシングルエリミネーション（BYEは試合数に含めません）または1回総当たりを選択できます。</div>${cards.join('')}${summary}<p class="prompt">開催時間から設営・受付・表彰・撤収の150分（開始前90分＋終了前60分）を控除済みです。3位決定戦、休憩、連戦制限、ダブルエントリー、予選と決勝の進行待ちは未反映です。募集枠の確定には別途スケジュール検証が必要です。</p>`;
 }
 
 const v10ScheduleEngine=(()=>{
@@ -493,7 +497,7 @@ function buildCategory(c,ci,scenario){
  return {prelim,knockouts,summary};
 }
 function scheduleScenario(config,scenario=0){
- const {start='09:00',end='17:00',reservedMinutes=120,matchMinutes=15,restMinutes=5,maxConsecutive=2,courts=4,qualificationMinutes=15,categories=[]}=config;
+ const {start='09:00',end='17:00',reservedMinutes=EVENT_CLOSE_MINUTES,matchMinutes=15,restMinutes=5,maxConsecutive=2,courts=4,qualificationMinutes=15,categories=[]}=config;
  const begin=time(start),endMinute=time(end);
  if(begin>=endMinute||![reservedMinutes,matchMinutes,restMinutes,maxConsecutive,courts,qualificationMinutes].every(Number.isInteger)||reservedMinutes<0||matchMinutes<1||restMinutes<0||maxConsecutive<1||courts<1||courts>100||qualificationMinutes<0)throw Error('invalid tournament settings');
  const deadline=Math.max(begin,endMinute-reservedMinutes),built=categories.map((c,i)=>buildCategory(c,i,scenario));
@@ -540,7 +544,7 @@ function simulate(config){
  const scenarios=config.scenarios??4;
  if(!Number.isInteger(scenarios)||scenarios<1||scenarios>16)throw Error('invalid scenario count');
  const runs=Array.from({length:scenarios},(_,s)=>scheduleScenario(config,s));
- return {status:runs.every(r=>r.status==='fits_scenario')?'fits_all_tested_scenarios':runs.some(r=>r.status==='invalid_groups')?'invalid_groups':'not_scheduled_in_all_scenarios',runs,assumptions:['Qualification identities and winning outcomes are hypothetical','All preliminary matches end before knockout starts','Specified qualification buffer is inserted','Pairs tracked across prelim and knockout in each scenario','Double entry unknown before sign-up','Greedy failure does not establish impossibility','120-minute reserve treated as end-of-day buffer']};
+ return {status:runs.every(r=>r.status==='fits_scenario')?'fits_all_tested_scenarios':runs.some(r=>r.status==='invalid_groups')?'invalid_groups':'not_scheduled_in_all_scenarios',runs,assumptions:['Qualification identities and winning outcomes are hypothetical','All preliminary matches end before knockout starts','Specified qualification buffer is inserted','Pairs tracked across prelim and knockout in each scenario','Double entry unknown before sign-up','Greedy failure does not establish impossibility','90-minute opening preparation and 60-minute closing reserve']};
 }
 return {simulate,buildCategoryPreview:buildCategory};
 
@@ -899,6 +903,76 @@ async function generatePreliminaryMatches(){
   finally{drawPreview.busy=false;render();}
 }
 
+// STEP 22-6-9-68: non-persistent schedule preview using existing match IDs.
+function realSchedulePreview(t){
+  if(!t)throw Error('大会が選択されていません。');
+  if(state.courtLoadError||state.error||state.loading)throw Error('試合・コート情報を取得できません。更新してください。');
+  const catIds=new Set(state.categories.filter(c=>c.tournament_id===t.id).map(c=>c.id));
+  const all=state.matches.filter(m=>catIds.has(m.category_id));
+  if(!all.length)throw Error('この大会に対戦表がありません。先に「6. 対戦表」を作成してください。');
+  if(all.some(m=>m.court_id!=null||m.start_time!=null))throw Error('既存の時刻・コート割当があります。変更せず、保存済み時間割の確認機能を後続工程で実装します。');
+  if(all.some(m=>stageFor(m)?.stage_type!=='preliminary'||m.status!=='scheduled'||!m.pair_a_id||!m.pair_b_id||m.score_a!=null||m.score_b!=null))throw Error('未対応の決勝試合、結果、試合状態が含まれます。既存データを保護するため仮配置を停止しました。');
+  const begin0=parseWindowMinute(String(t.start_time||'').slice(0,5)),end0=parseWindowMinute(String(t.end_time||'').slice(0,5));
+  const begin=begin0+EVENT_PREP_MINUTES,deadline=end0-EVENT_CLOSE_MINUTES;
+  const duration=Number(t.match_minutes),rest=Number(t.minimum_rest_minutes),limit=Number(t.max_consecutive_matches);
+  if(begin0===null||end0===null||!Number.isInteger(duration)||duration<1||!Number.isInteger(rest)||rest<0||!Number.isInteger(limit)||limit<1||begin+duration>deadline)throw Error('大会時間・休憩・連戦の設定が不正です。');
+  const courts=state.courts.filter(c=>c.tournament_id===t.id&&c.court_type==='official'&&c.is_active).sort((a,b)=>a.name.localeCompare(b.name,'ja',{numeric:true})||a.id.localeCompare(b.id));
+  if(!courts.length)throw Error('使用できる公式コートがありません。');
+  const pairById=new Map(state.pairs.map(p=>[p.id,p]));
+  // Use names as a conservative cross-category double-entry guard.
+  const people=m=>[m.pair_a_id,m.pair_b_id].flatMap(id=>{const p=pairById.get(id);if(!p||p.category_id!==m.category_id||p.participation_status!=='active')throw Error('試合に紐づく有効ペアが確認できません。');return [p.player1,p.player2].map(v=>String(v||'').trim().toLocaleLowerCase());});
+  const tasks=all.map(m=>({m,persons:people(m)}));
+  if(tasks.some(x=>x.persons.some(v=>!v)||new Set(x.persons).size!==4))throw Error('同一選手の重複・選手名の欠落があります。');
+  const categoryMap=new Map(state.categories.map(c=>[c.id,c]));
+  const windowMap=new Map();
+  for(const id of catIds){const c=categoryMap.get(id);if(!all.some(m=>m.category_id===id))continue;
+    const start=c.schedule_start_time?parseWindowMinute(String(c.schedule_start_time).slice(0,5)):begin;
+    const end=c.schedule_end_time?parseWindowMinute(String(c.schedule_end_time).slice(0,5)):deadline;
+    if(start===null||end===null)throw Error('カテゴリー開催枠が不正です。');
+    windowMap.set(id,{start:Math.max(begin,start),end:Math.min(deadline,end),max:c.max_courts==null?courts.length:Number(c.max_courts),preferred:c.preferred_courts==null?courts.length:Number(c.preferred_courts)});
+  }
+  const pending=tasks.slice().sort((a,b)=>catName(a.m.category_id).localeCompare(catName(b.m.category_id),'ja')||(a.m.group_name||'').localeCompare(b.m.group_name||'')||[a.m.pair_a_id,a.m.pair_b_id].sort().join().localeCompare([b.m.pair_a_id,b.m.pair_b_id].sort().join()));
+  const lastEnd=new Map(),lastSlot=new Map(),streak=new Map(),rows=[];
+  for(let at=begin;pending.length&&at+duration<=deadline;at+=duration){
+    const occupied=new Set(),usedCat=new Map(),usedCourts=new Set();
+    // Favor participants who have waited longer; deterministic tiebreaker.
+    pending.sort((a,b)=>Math.min(...a.persons.map(x=>lastEnd.get(x)??-99999))-Math.min(...b.persons.map(x=>lastEnd.get(x)??-99999)));
+    for(const court of courts){
+      const index=pending.findIndex(task=>{
+        const w=windowMap.get(task.m.category_id),catUsed=usedCat.get(task.m.category_id)||0;
+        return at>=w.start&&at+duration<=w.end&&catUsed<w.max&&task.persons.every(person=>!occupied.has(person)&&(lastEnd.get(person)==null||at-lastEnd.get(person)>=rest)&&(lastSlot.get(person)!==at-duration||(streak.get(person)||0)<limit));
+      });
+      if(index<0)break;
+      const task=pending.splice(index,1)[0];
+      for(const person of task.persons){const consecutive=lastSlot.get(person)===at-duration;streak.set(person,consecutive?(streak.get(person)||0)+1:1);lastSlot.set(person,at);lastEnd.set(person,at+duration);occupied.add(person);}
+      usedCourts.add(court.id);usedCat.set(task.m.category_id,(usedCat.get(task.m.category_id)||0)+1);
+      rows.push({match:task.m,court,start:at,end:at+duration,persons:task.persons});
+    }
+  }
+  // Independently re-check every placed match, and all participant timelines.
+  const errors=[],times=new Map(),byPerson=new Map();
+  for(const r of rows){const w=windowMap.get(r.match.category_id),key=r.start+'|'+r.court.id;
+    if(times.has(key))errors.push('コート重複');times.set(key,true);
+    if(r.start<w.start||r.end>w.end||r.end>deadline||r.start<begin||r.end-r.start!==duration)errors.push('時間枠違反');
+    for(const person of r.persons){if(!byPerson.has(person))byPerson.set(person,[]);byPerson.get(person).push(r);}
+  }
+  for(const rr of byPerson.values()){
+    rr.sort((a,b)=>a.start-b.start);let run=0,previous=null;
+    for(const r of rr){if(previous&&r.start<previous.end+rest)errors.push('選手の休憩・同時刻違反');run=previous&&r.start===previous.start+duration?run+1:1;if(run>limit)errors.push('連戦上限違反');previous=r;}
+  }
+  if(errors.length)throw Error('内部検証に失敗：'+[...new Set(errors)].join('、'));
+  rows.sort((a,b)=>a.start-b.start||a.court.name.localeCompare(b.court.name,'ja',{numeric:true}));
+  return {rows,pending,begin,deadline,courts,duration,total:all.length};
+}
+function realScheduleSection(t){
+  if(!t)return '<div class="notice">対象大会を選択してください。</div>';
+  let body='';try{
+    const result=realSchedulePreview(t),{rows,pending,begin,deadline,total,courts,duration}=result;
+    const complete=!pending.length;
+    body=`<div class="metrics"><div class="metric"><small>仮配置</small><strong>${rows.length}/${total}</strong></div><div class="metric"><small>公式コート</small><strong>${courts.length}面</strong></div><div class="metric"><small>未配置</small><strong>${pending.length}</strong></div></div><div class="notice ${complete?'blue':''}">${complete?'全試合を仮配置できました。重複・休憩・連戦の独立チェックも通過しました。':'全試合を配置できませんでした。時間枠や試合条件をご確認ください。'} DBへの保存はしていません。</div><p class="prompt">試合開始可能 ${minuteClock(begin)} ／ 終了期限 ${minuteClock(deadline)} ／ 1試合 ${duration}分 ／ 最終仮終了 ${rows.length?minuteClock(Math.max(...rows.map(r=>r.end))):'—'}</p><div class="tablebox"><table class="tbl"><thead><tr><th>開始〜終了</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${minuteClock(r.start)}〜${minuteClock(r.end)}</td><td>${esc(r.court.name)}</td><td>${esc(catName(r.match.category_id))}・${esc(r.match.group_name||'—')}組</td><td>${esc(pairName(r.match.pair_a_id))} 対 ${esc(pairName(r.match.pair_b_id))}</td></tr>`).join('')||'<tr><td colspan="4">仮配置なし</td></tr>'}</tbody></table></div>`;
+  }catch(e){body=`<div class="notice">${esc(e.message)}</div>`;}
+  return `<h2>実試合の時間割プレビュー</h2><div class="notice blue">DBに保存された対戦カード・試合IDを使い、大会全体でコートを共有して仮配置します。開始後90分は準備、終了前60分は閉会式・撤収用です。試合結果や既存割当がある大会は安全のため仮配置を停止します。</div><div class="card stack">${body}<p class="prompt">これは簡易的な貪欲法による仮配置です。未配置は開催不可能を意味しません。選手名が一致する別カテゴリー参加も同時出場として避けますが、同姓同名などの本人確認は未実装です。決勝進出後の試合・当日キャンセルへの再編成・DB保存は後続工程で対応します。</p></div>`;
+}
 function manage(){
  if(!canOpenManage())return '<div class="notice">大会管理権限を確認できません。再ログインまたは更新してください。</div>';
  const sysAdmin=state.systemAdminLoaded&&state.systemAdmin&&!state.systemAdminError;
@@ -919,11 +993,11 @@ function manage(){
   const timeToMinutes=v=>{if(!/^\d{2}:\d{2}$/.test(v))return null;const [h,m]=v.split(':').map(Number);return h<24&&m<60?h*60+m:null};
   const startMinutes=timeToMinutes(st),endMinutes=timeToMinutes(et);
   const duration=startMinutes!==null&&endMinutes!==null&&endMinutes>startMinutes?endMinutes-startMinutes:null;
-  const playableMinutes=duration===null?null:Math.max(0,duration-120);
+  const playableMinutes=duration===null?null:Math.max(0,duration-EVENT_RESERVED_MINUTES);
   const slotMinutes=Number(t?.match_minutes);
   const capacity=playableMinutes===null||state.courtLoadError||!(slotMinutes>0)?null:officialCourts.length*Math.floor(playableMinutes/slotMinutes);
   const courtList=tournamentCourts.slice().sort((a,b)=>a.name.localeCompare(b.name,'ja',{numeric:true}));
-  const facilitySection=allowed.length?`<h2>開催時間・コート設定</h2><div class="notice blue">大会の開催時間から設営・受付・表彰・撤収の120分を控除して、公式戦用コートで実施できる理論試合枠を計算します。</div><form class="card stack" id="eventTimeForm"><h3>開催時間</h3>${draft?'':'<div class="notice">下書き以外の大会では変更できません。</div>'}<div class="grid"><div><label for="eventStartTime">開始時刻</label><input class="field" id="eventStartTime" type="time" value="${esc(st)}" ${draft?'':'disabled'}></div><div><label for="eventEndTime">終了時刻</label><input class="field" id="eventEndTime" type="time" value="${esc(et)}" ${draft?'':'disabled'}></div></div><p class="prompt">開始・終了を両方空にすると未設定に戻せます。日をまたぐ大会には現時点では対応していません。</p><p class="empty-error hide" id="eventTimeMsg" role="alert"></p><button type="submit" id="eventTimeSubmit" class="btn wide" ${draft?'':'disabled'}>開催時間を保存</button></form><form class="card stack" id="numberedCourtsForm"><h3>公式戦用コートを追加</h3><div><label for="numberedCourtCount">1番〜何番コートまで登録しますか？（最大100面）</label><input class="field" id="numberedCourtCount" type="number" min="1" max="100" step="1" value="${esc(Math.max(officialCourts.length,1))}" required ${draft&&!state.courtLoadError?'':'disabled'}></div><p class="prompt">既存の同じ番号は再利用し、足りない番号のみ追加します。削除や無効化は行いません。別の大会では同じ番号を使用できます。</p>${state.courtLoadError?`<div class="empty-error">コート情報を取得できません：${esc(state.courtLoadError)}。登録を停止しています。</div>`:''}<p class="empty-error hide" id="numberedCourtsMsg" role="alert"></p><button type="submit" id="numberedCourtsSubmit" class="btn wide" ${draft&&!state.courtLoadError?'':'disabled'}>番号付きコートを登録</button><div class="line"></div><h3>登録済みコート</h3>${courtList.length?courtList.map(c=>`<div class="category-entry"><b>${esc(c.name)}</b><span class="status ${c.is_active&&c.court_type==='official'?'done':''}">${esc(c.court_type==='official'?'公式戦用':'交流用')}／${c.is_active?'有効':'無効'}</span></div>`).join(''):'<p class="prompt">コートはまだ登録されていません。</p>'}</form><div class="card"><h3>試合収容力（概算）</h3><div class="metrics"><div class="metric"><small>公式戦用コート</small><strong>${state.courtLoadError?'—':officialCourts.length}面</strong></div><div class="metric"><small>試合可能時間</small><strong>${playableMinutes===null?'—':playableMinutes}分</strong></div><div class="metric"><small>理論上の試合枠</small><strong>${capacity===null?'—':capacity}試合</strong></div></div><p class="prompt">計算：公式戦用有効コート数 × ⌊max(開催時間−120分, 0) ÷ 1試合${esc(t?.match_minutes||'—')}分⌋。最低休憩、連戦制限、複数カテゴリーの進行待ちは未反映です。</p>${duration===null?'<div class="notice">開催時間を設定すると試合枠を計算できます。</div>':''}</div>`:'';
+  const facilitySection=allowed.length?`<h2>開催時間・コート設定</h2><div class="notice blue">大会の開催時間から設営・受付・表彰・撤収の150分（開始前90分＋終了前60分）を控除して、公式戦用コートで実施できる理論試合枠を計算します。</div><form class="card stack" id="eventTimeForm"><h3>開催時間</h3>${draft?'':'<div class="notice">下書き以外の大会では変更できません。</div>'}<div class="grid"><div><label for="eventStartTime">開始時刻</label><input class="field" id="eventStartTime" type="time" value="${esc(st)}" ${draft?'':'disabled'}></div><div><label for="eventEndTime">終了時刻</label><input class="field" id="eventEndTime" type="time" value="${esc(et)}" ${draft?'':'disabled'}></div></div><p class="prompt">開始・終了を両方空にすると未設定に戻せます。日をまたぐ大会には現時点では対応していません。</p><p class="empty-error hide" id="eventTimeMsg" role="alert"></p><button type="submit" id="eventTimeSubmit" class="btn wide" ${draft?'':'disabled'}>開催時間を保存</button></form><form class="card stack" id="numberedCourtsForm"><h3>公式戦用コートを追加</h3><div><label for="numberedCourtCount">1番〜何番コートまで登録しますか？（最大100面）</label><input class="field" id="numberedCourtCount" type="number" min="1" max="100" step="1" value="${esc(Math.max(officialCourts.length,1))}" required ${draft&&!state.courtLoadError?'':'disabled'}></div><p class="prompt">既存の同じ番号は再利用し、足りない番号のみ追加します。削除や無効化は行いません。別の大会では同じ番号を使用できます。</p>${state.courtLoadError?`<div class="empty-error">コート情報を取得できません：${esc(state.courtLoadError)}。登録を停止しています。</div>`:''}<p class="empty-error hide" id="numberedCourtsMsg" role="alert"></p><button type="submit" id="numberedCourtsSubmit" class="btn wide" ${draft&&!state.courtLoadError?'':'disabled'}>番号付きコートを登録</button><div class="line"></div><h3>登録済みコート</h3>${courtList.length?courtList.map(c=>`<div class="category-entry"><b>${esc(c.name)}</b><span class="status ${c.is_active&&c.court_type==='official'?'done':''}">${esc(c.court_type==='official'?'公式戦用':'交流用')}／${c.is_active?'有効':'無効'}</span></div>`).join(''):'<p class="prompt">コートはまだ登録されていません。</p>'}</form><div class="card"><h3>試合収容力（概算）</h3><div class="metrics"><div class="metric"><small>公式戦用コート</small><strong>${state.courtLoadError?'—':officialCourts.length}面</strong></div><div class="metric"><small>試合可能時間</small><strong>${playableMinutes===null?'—':playableMinutes}分</strong></div><div class="metric"><small>理論上の試合枠</small><strong>${capacity===null?'—':capacity}試合</strong></div></div><p class="prompt">計算：公式戦用有効コート数 × ⌊max(開催時間−150分, 0) ÷ 1試合${esc(t?.match_minutes||'—')}分⌋。最低休憩、連戦制限、複数カテゴリーの進行待ちは未反映です。</p>${duration===null?'<div class="notice">開催時間を設定すると試合枠を計算できます。</div>':''}</div>`:'';
  const section=`<h2>カテゴリー管理</h2><div class="notice blue">1大会に複数のカテゴリーを登録できます。追加操作は対象大会の管理者のみ実行できます。</div>${state.tournamentAdminError?`<div class="empty-error">管理権限の取得に失敗しました：${esc(state.tournamentAdminError)}</div>`:''}${!state.tournamentAdminLoaded?'<div class="notice">大会管理者権限を確認しています…</div>':''}${allowed.length?`<div class="card"><h3>登録済みカテゴリー</h3>${list}</div><form class="card stack" id="createCategoryForm"><h3>カテゴリーを追加</h3>${draft?'':`<div class="notice">この大会は draft（下書き）ではないため、カテゴリーを追加できません。</div>`}<div><label>級別（複数選択可・連続する級別のみ）</label><div class="category-levels">${CATEGORY_LEVELS.map((level,i)=>`<label class="category-level"><input type="checkbox" data-category-level="${i}" ${selected.includes(i)?'checked':''} ${draft?'':'disabled'}><span>${esc(level)}</span></label>`).join('')}</div></div><div><label for="categoryDivision">参加区分</label><select class="field" id="categoryDivision" ${draft?'':'disabled'}>${CATEGORY_DIVISIONS.map(x=>opt(x,x,categoryForm.division)).join('')}</select></div><div><label for="categoryDisplayOrder">表示順（0〜1000）</label><input class="field" id="categoryDisplayOrder" type="number" min="0" max="1000" step="1" value="${esc(categoryForm.displayOrder)}" ${draft?'':'disabled'}></div><div><label>追加するカテゴリー名</label><div class="category-preview">${esc(categoryName||'級別を選択してください')}</div></div>${selected.length&&!valid?'<div class="empty-error">級別は連続して選択してください（例：初級・初中級・中級）。</div>':''}${duplicate?'<div class="notice">同名のカテゴリーが登録されています。</div>':''}<p id="createCategoryMsg" class="empty-error hide" role="alert"></p><button id="createCategorySubmit" type="submit" class="btn wide" ${draft&&valid&&!duplicate?'':'disabled'}>このカテゴリーを追加</button><p class="prompt">登録後も、この大会に別のカテゴリーを続けて追加できます。カテゴリー名は自動生成します。</p></form>`:'<div class="card">管理者として担当している大会がありません。</div>'}`;
  const overview=`<h2>大会準備</h2><div class="notice blue">設計で確定した準備工程を順に表示します。画面切替ではDBに書き込みません。各項目は「保存」操作で確定します。</div><div class="card"><label for="manageTournament">対象大会</label><select class="field" id="manageTournament">${allowed.map(x=>opt(x.id,x.name,prepCreatingTournament?'':categoryForm.tournamentId)).join('')}${sysAdmin?opt('__create_new__','＋ 大会を新規追加',prepCreatingTournament?'__create_new__':''):''}</select><p class="prompt">${prepCreatingTournament?'新しい大会の情報を入力してください。保存するまでは作成されません。':esc(t?.name||'管理対象大会なし')+' ／ 状態：'+esc(t?.status||'—')+' ／ カテゴリー '+existing.length+' 件'}</p></div>${prepCreatingTournament?'':`<div class="prep-steps" role="navigation" aria-label="大会準備の工程">${PREP_PAGES.map(([key,label])=>`<button type="button" class="prep-step ${prepPage===key?'current':''}" data-prep-page="${key}" aria-current="${prepPage===key?'step':'false'}">${esc(label)}</button>`).join('')}</div>`}`;
  const pages={
@@ -933,7 +1007,7 @@ function manage(){
   entries:()=>`${pairImportSection()}${pairManageSection()}`,
   groups:()=>groupingPreviewSection(t,existing),
   draw:()=>drawSection(t,existing),
-  schedule:()=>prepPlaceholder('実試合の時間割生成','現在の可変コート割当は募集前の仮シミュレーションであり、実試合への保存は未実装です'),
+  schedule:()=>realScheduleSection(t),
   publish:()=>prepPlaceholder('公開前検証・公開・印刷','未配置試合などの検証と公開、紙用PDFの発行は未実装です')
  };
  return overview+(prepCreatingTournament?(sysAdmin?tournamentSection:'<div class="notice">大会の新規作成にはシステム管理者権限が必要です。</div>'):(pages[prepPage]||pages.basic)());
@@ -1016,9 +1090,9 @@ function newTournamentCreationSection(){
   const levels=CATEGORY_LEVELS.map((lv,j)=>`<label class="category-level"><input type="checkbox" data-nt-level="${i}" value="${j}" ${c.levels.includes(j)?'checked':''}><span>${esc(lv)}</span></label>`).join('');
   const cf=(label,key,type='number',extra='')=>`<div><label>${label}</label><input class="field" data-nt-cat="${i}" data-nt-key="${key}" type="${type}" value="${esc(c[key])}" ${extra}></div>`;
   const cs=(label,key,values)=>`<div><label>${label}</label><select class="field" data-nt-cat="${i}" data-nt-key="${key}">${values.map(v=>opt(String(v[0]),v[1],String(c[key]))).join('')}</select></div>`;
-  return `<div class="card stack"><div class="row"><h3 style="margin:0">カテゴリー${i+1}：${esc(title)}</h3><button type="button" class="btn secondary mini-btn" data-nt-remove="${i}">削除</button></div><div><label>級別（連続する範囲を選択）</label><div class="category-levels">${levels}</div></div><div class="grid">${cs('参加区分','division',CATEGORY_DIVISIONS.map(x=>[x,x]))}${cf('表示順（0〜1000）','order','number','min="0" max="1000" step="1"')}</div><h3>募集枠（任意）</h3><div class="grid">${cf('募集予定ペア数（3〜64、未定なら空欄）','pairs','number','min="3" max="64" step="1" placeholder="未設定"')}${cs('1組の最大ペア数','group',[3,4,5,6].map(x=>[x,x+'ペア']))}${cs('各組の決勝進出','advance',[[1,'上位1ペア'],[2,'上位2ペア']])}${cs('決勝形式','final',[['knockout','トーナメント'],['round_robin','総当たり']])}</div><p class="prompt">募集予定ペア数が空欄なら、予選・決勝条件もDBへは保存しません。</p><h3>開催枠（任意）</h3><div class="grid">${cf('カテゴリー開始','start','time')}${cf('カテゴリー終了','end','time')}${cf('希望コート面数','preferred','number','min="1" max="100" placeholder="未設定"')}${cf('最大同時コート面数','max','number','min="1" max="100" placeholder="未設定"')}</div><p class="prompt">設定する場合は4項目すべて入力してください。開催終了は大会終了120分前までです。</p></div>`;
+  return `<div class="card stack"><div class="row"><h3 style="margin:0">カテゴリー${i+1}：${esc(title)}</h3><button type="button" class="btn secondary mini-btn" data-nt-remove="${i}">削除</button></div><div><label>級別（連続する範囲を選択）</label><div class="category-levels">${levels}</div></div><div class="grid">${cs('参加区分','division',CATEGORY_DIVISIONS.map(x=>[x,x]))}${cf('表示順（0〜1000）','order','number','min="0" max="1000" step="1"')}</div><h3>募集枠（任意）</h3><div class="grid">${cf('募集予定ペア数（3〜64、未定なら空欄）','pairs','number','min="3" max="64" step="1" placeholder="未設定"')}${cs('1組の最大ペア数','group',[3,4,5,6].map(x=>[x,x+'ペア']))}${cs('各組の決勝進出','advance',[[1,'上位1ペア'],[2,'上位2ペア']])}${cs('決勝形式','final',[['knockout','トーナメント'],['round_robin','総当たり']])}</div><p class="prompt">募集予定ペア数が空欄なら、予選・決勝条件もDBへは保存しません。</p><h3>開催枠（任意）</h3><div class="grid">${cf('カテゴリー開始','start','time')}${cf('カテゴリー終了','end','time')}${cf('希望コート面数','preferred','number','min="1" max="100" placeholder="未設定"')}${cf('最大同時コート面数','max','number','min="1" max="100" placeholder="未設定"')}</div><p class="prompt">設定する場合は4項目すべて入力してください。開催枠は大会開始90分後から終了60分前までです。</p></div>`;
  }).join('');
- return `<h2>大会情報を新規登録</h2><div class="notice blue">システム管理者専用です。大会・公式コート・カテゴリー・募集枠・開催枠を一括作成します。途中でエラーが出た場合は全体をロールバックします。</div><form class="stack" id="createTournamentForm"><div class="card stack"><h3>1. 大会基本情報</h3>${field('大会名（必須）','name','text','maxlength="200" required placeholder="例：秋季ピックルボール大会"')}${field('開催日（必須）','date','date','required')}<div class="grid">${field('大会開始時刻（必須）','start','time','required')}${field('大会終了時刻（必須）','end','time','required')}${field('1試合の時間（分）','minutes','number','min="1" max="180" required')}${field('最低休憩時間（分）','rest','number','min="0" max="180" required')}${field('最大連続試合数','consecutive','number','min="1" max="10" required')}${field('公式コート数（0〜100）','courts','number','min="0" max="100" required')}</div><p class="prompt">大会の終了前120分は設営・受付・表彰・撤収の運営用として確保する仮定です。コート0面でも下書きを作成できますが、開催枠のあるカテゴリーは登録できません。</p></div><div class="row"><h2>2. カテゴリーと募集枠（任意）</h2><button type="button" class="btn secondary mini-btn" id="ntAddCategory">＋ 追加</button></div>${categoryCards||'<div class="card"><p class="prompt">カテゴリーはまだ追加されていません。基本情報だけで大会を作成することもできます。</p></div>'}<div class="card stack"><p class="prompt">作成ステータスは下書き（draft）です。作成後に各設定を変更できます。実ペア・対戦表・正式な時間割は生成しません。</p><p id="createTournamentMsg" class="empty-error hide" role="alert"></p><button id="createTournamentSubmit" type="submit" class="btn wide" ${newTournamentBusy?'disabled':''}>${newTournamentBusy?'作成中…':'内容を確認して大会を作成'}</button></div></form>`;
+ return `<h2>大会情報を新規登録</h2><div class="notice blue">システム管理者専用です。大会・公式コート・カテゴリー・募集枠・開催枠を一括作成します。途中でエラーが出た場合は全体をロールバックします。</div><form class="stack" id="createTournamentForm"><div class="card stack"><h3>1. 大会基本情報</h3>${field('大会名（必須）','name','text','maxlength="200" required placeholder="例：秋季ピックルボール大会"')}${field('開催日（必須）','date','date','required')}<div class="grid">${field('大会開始時刻（必須）','start','time','required')}${field('大会終了時刻（必須）','end','time','required')}${field('1試合の時間（分）','minutes','number','min="1" max="180" required')}${field('最低休憩時間（分）','rest','number','min="0" max="180" required')}${field('最大連続試合数','consecutive','number','min="1" max="10" required')}${field('公式コート数（0〜100）','courts','number','min="0" max="100" required')}</div><p class="prompt">大会開始後90分（設営30分・受付とアップ45分・開会式15分）と終了前60分（閉会式・撤収）を確保します。コート0面でも下書きを作成できますが、開催枠のあるカテゴリーは登録できません。</p></div><div class="row"><h2>2. カテゴリーと募集枠（任意）</h2><button type="button" class="btn secondary mini-btn" id="ntAddCategory">＋ 追加</button></div>${categoryCards||'<div class="card"><p class="prompt">カテゴリーはまだ追加されていません。基本情報だけで大会を作成することもできます。</p></div>'}<div class="card stack"><p class="prompt">作成ステータスは下書き（draft）です。作成後に各設定を変更できます。実ペア・対戦表・正式な時間割は生成しません。</p><p id="createTournamentMsg" class="empty-error hide" role="alert"></p><button id="createTournamentSubmit" type="submit" class="btn wide" ${newTournamentBusy?'disabled':''}>${newTournamentBusy?'作成中…':'内容を確認して大会を作成'}</button></div></form>`;
 }
 function intField(raw,min,max,label){if(!/^\d+$/.test(String(raw)))throw Error(label+'は整数で入力してください。');const n=Number(raw);if(!Number.isSafeInteger(n)||n<min||n>max)throw Error(label+'は'+min+'〜'+max+'の整数で指定してください。');return n;}
 function validateNewTournament(){
@@ -1047,7 +1121,7 @@ function validateNewTournament(){
   if(any){
    if([c.start,c.end,c.preferred,c.max].some(v=>v===''))throw Error('カテゴリー'+index+'の開催枠は4項目すべて入力してください。');
    const cs=parseWindowMinute(c.start),ce=parseWindowMinute(c.end);
-   if(cs===null||ce===null||cs< s||cs>=ce||ce>e-120)throw Error('カテゴリー'+index+'の開催枠は大会時間内・終了120分前までにしてください。');
+   if(cs===null||ce===null||cs<s+EVENT_PREP_MINUTES||cs>=ce||ce>e-EVENT_CLOSE_MINUTES)throw Error('カテゴリー'+index+'の開催枠は大会開始90分後から終了60分前までにしてください。');
    const preferred=intField(c.preferred,1,100,'希望面数'),max=intField(c.max,1,100,'最大面数');
    if(preferred>max||max>courts)throw Error('カテゴリー'+index+'のコート面数が公式コート上限を超えています。');
    Object.assign(item,{schedule_start_time:c.start,schedule_end_time:c.end,preferred_courts:preferred,max_courts:max});
