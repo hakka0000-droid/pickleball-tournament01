@@ -743,6 +743,8 @@ function groupingPreviewSection(t,categories){
   let offset=0;
   const groups=selected?selected.sizes.map((size,i)=>{const members=participants.slice(offset,offset+size);offset+=size;return {name:groupLabel(i),members};}):[];
   const protectedData=state.matches.some(m=>m.category_id===cat.id)||state.approved.some(r=>r.category_id===cat.id)||state.qualificationLocks.includes(cat.id)||state.officialResults.some(r=>r.category_id===cat.id&&['confirmed','revoked'].includes(r.status));
+  const canSaveGroups=groupSaveEligible(t,cat,active,selected);
+  const saveBlockReason=groupingPreview.busy?'保存処理中です。':demo?'仮データは保存できません。登録済みの有効ペアに切り替えてください。':t.status!=='draft'?'下書き大会のみ確定できます。':!state.tournamentAdminIds.includes(t.id)?'対象大会の管理者権限がありません。':active.length<3?'有効ペアが3ペア以上必要です。':!selected?'現在の人数・組人数設定では組分け候補がありません。':state.pairs.some(p=>p.category_id===cat.id&&p.group_name!=null)?'既に組分け済みです。上書きできません。':protectedData?'試合・承認・確定情報があるため保存できません。':'権限またはDBの確認情報が不足しています。画面の「更新」を押してください。';
   const grid=groups.map(g=>`<section class="card"><h3>${esc(g.name)}組 <span class="status">${g.members.length}ペア</span></h3><ol style="padding-left:25px;margin-bottom:3px">${g.members.map(p=>`<li style="padding:5px 0">${esc(p.display_name)}</li>`).join('')}</ol></section>`).join('');
   return `<h2>予選組分け・プレビュー</h2><div class="notice blue"><b>組分けプレビュー：</b> 組数を変更しただけではSupabaseには保存されません。登録済みペアでは大会管理者が確認後に確定保存できます。組数は自動的に最小化せず、均等に割り振れる候補から管理者が選択します。</div>
     <div class="card stack"><div><label for="groupPreviewCategory">対象カテゴリー</label><select class="field" id="groupPreviewCategory">${categories.map(c=>opt(c.id,c.name,cat.id)).join('')}</select></div>
@@ -751,7 +753,10 @@ function groupingPreviewSection(t,categories){
     <div><label for="groupPreviewCount">組数（各組3ペア以上、人数差は最大1ペア）</label><select class="field" id="groupPreviewCount" ${options.length?'':'disabled'}>${options.length?options.map(o=>opt(String(o.count),`${o.count}組：${o.sizes.join('・')}ペア`,groupingPreview.groupCount)).join(''):opt('','候補なし','')}</select></div>
     ${!demo&&protectedData?'<div class="notice">このカテゴリーには既存の試合や確定情報があります。将来の保存処理は安全性確認が完了するまで禁止する設計です。ここでの表示はDBに影響しません。</div>':''}
     ${selected?`<p><b>${participants.length}ペア → ${selected.count}組</b>（${selected.sizes.join('・')}ペア／組）</p><div class="grid">${grid}</div>`:`<div class="notice">${demo?'人数構成を計算できません。':'現在の有効ペア数と最大組人数では組分け候補がありません。3ペア以上を登録するか、カテゴリーの募集枠設定を確認してください。'}</div>`}
-    <p class="prompt">プレビューは再現性のある名前順の仮配置です。実際の抽選・シード・対戦重複回避は未実装です。既存のgroup_nameは変更しません。保存・組分け確定は後続STEPで実装します。</p></div>`;
+    <button type="button" class="btn wide" id="savePreliminaryGroups" ${canSaveGroups?'':'disabled'}>${groupingPreview.busy?'確定処理中…':'予選組分けを確定して保存'}</button>
+    ${!canSaveGroups?`<p class="prompt" role="status">保存できない理由：${esc(saveBlockReason)}</p>`:''}
+    ${groupingPreview.message?`<div class="${groupingPreview.success?'notice blue':'empty-error'}" role="status">${esc(groupingPreview.message)}</div>`:''}
+    <p class="prompt">プレビューは再現性のある名前順の仮配置です。実際の抽選・シード・対戦重複回避は未実装です。保存操作を実行するまでは既存のgroup_nameは変更しません。</p></div>`;
 }
 function manage(){
  if(!canOpenManage())return '<div class="notice">大会管理権限を確認できません。再ログインまたは更新してください。</div>';
