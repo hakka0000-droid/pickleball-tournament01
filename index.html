@@ -811,6 +811,94 @@ function groupingPreviewSection(t,categories){
     ${groupingPreview.message?`<div class="${groupingPreview.success?'notice blue':'empty-error'}" role="status">${esc(groupingPreview.message)}</div>`:''}
     <p class="prompt">プレビューは再現性のある名前順の仮配置です。実際の抽選・シード・対戦重複回避は未実装です。保存操作を実行するまでは既存のgroup_nameは変更しません。</p></div>`;
 }
+// STEP 22-6-9-62: preview and admin-only preliminary round-robin generation.
+const drawPreview={categoryId:'',busy:false,message:'',success:false};
+function drawPlan(t,cat){
+  if(!t||!cat)return {reason:'対象の大会・カテゴリーがありません。'};
+  const all=state.pairs.filter(p=>p.category_id===cat.id);
+  const active=all.filter(p=>p.participation_status==='active');
+  const groups=[...new Set(active.map(p=>p.group_name))].sort();
+  const max=Number(cat.preliminary_group_max_pairs);
+  const planned=Number(cat.planned_pairs);
+  const issues=[];
+  if(!Number.isInteger(max)||max<3||max>6)issues.push('1組の最大ペア数が未設定です。');
+  if(!Number.isInteger(planned)||active.length>planned)issues.push('募集枠の設定を確認してください。');
+  if(active.length<3||active.length>256)issues.push('有効ペア数は3〜256ペアにしてください。');
+  if(all.some(p=>p.participation_status!=='active'&&p.group_name!=null))issues.push('参加対象外のペアに組分けが残っています。');
+  if(active.some(p=>!p.group_name))issues.push('組分け未確定の有効ペアがあります。');
+  const sizes=groups.map(g=>active.filter(p=>p.group_name===g).length);
+  if(!groups.length||sizes.some(n=>n<3||n>max)||Math.max(...sizes)-Math.min(...sizes)>1)issues.push('組人数または均等配置が正しくありません。');
+  if(groups.some((g,i)=>g!==groupLabel(i)))issues.push('組名はA組から連続している必要があります。');
+  const matches=groups.flatMap(g=>{
+    const ps=active.filter(p=>p.group_name===g).sort((a,b)=>a.display_name.localeCompare(b.display_name,'ja')||a.id.localeCompare(b.id));
+    const out=[];
+    for(let i=0;i<ps.length;i++)for(let j=i+1;j<ps.length;j++)out.push({group:g,a:ps[i],b:ps[j]});
+    return out;
+  });
+  if(state.matches.some(m=>m.category_id===cat.id)||state.stages.some(st=>st.category_id===cat.id))issues.push('既存の試合またはステージがあります。再生成できません。');
+  if(state.approved.some(a=>a.category_id===cat.id)||state.qualificationLocks.includes(cat.id))issues.push('順位承認または決勝進出者の確定があります。');
+  if(state.officialResults.some(r=>r.category_id===cat.id&&r.status!=='unconfirmed'))issues.push('正式結果の確定・取消情報があります。');
+  if(state.bracketSlots.some(sl=>state.stages.some(st=>st.id===sl.stage_id&&st.category_id===cat.id)))issues.push('決勝対戦枠が存在します。');
+  return {active,groups,sizes,matches,issues};
+}
+function drawEligible(t,cat,plan,allowBusy=false){
+  return !!client&&!!t&&!!cat&&(allowBusy||!drawPreview.busy)&&!state.loading&&!state.error&&t.status==='draft'
+    &&canManageCategories()&&state.tournamentAdminIds.includes(t.id)
+    &&state.approvedLoaded&&!state.approvedError&&state.qualificationLocksLoaded&&!state.qualificationLocksError
+    &&state.officialLoaded&&!state.officialError&&!state.bracketError
+    &&plan.issues?.length===0;
+}
+function drawSection(t,categories){
+  if(!t||!categories.length)return '<div class="notice">先にカテゴリーと組分けを登録してください。</div>';
+  if(!categories.some(c=>c.id===drawPreview.categoryId))drawPreview.categoryId=categories[0].id;
+  const cat=categories.find(c=>c.id===drawPreview.categoryId),plan=drawPlan(t,cat),existing=state.matches.filter(m=>m.category_id===cat.id);
+  const preliminary=existing.filter(m=>state.stages.some(st=>st.id===m.stage_id&&st.stage_type==='preliminary'));
+  const eligible=drawEligible(t,cat,plan);
+  const reason=plan.issues?.[0]|| (t.status!=='draft'?'下書き大会のみ生成できます。':!canManageCategories()||!state.tournamentAdminIds.includes(t.id)?'対象大会の管理者権限がありません。':'取得情報または保存条件が未確認です。「更新」を押してください。');
+  const header=`<h2>予選対戦表の生成・確定</h2><div class="notice blue">確定済みの組分けから、各組1回総当たりの対戦カードを生成します。表示・カテゴリー切替では保存されません。生成時はコート・開始時刻を未設定にします。</div><div class="card stack"><div><label for="drawCategory">対象カテゴリー</label><select id="drawCategory" class="field">${categories.map(c=>opt(c.id,c.name,cat.id)).join('')}</select></div>`;
+  const summary=`<div class="metrics"><div class="metric"><small>組数</small><strong>${plan.groups?.length||0}</strong></div><div class="metric"><small>有効ペア</small><strong>${plan.active?.length||0}</strong></div><div class="metric"><small>生成予定試合</small><strong>${plan.matches?.length||0}</strong></div></div>`;
+  if(existing.length||state.stages.some(st=>st.category_id===cat.id)){
+    const rows=preliminary.slice().sort((a,b)=>(a.group_name||'').localeCompare(b.group_name||'')||pairName(a.pair_a_id).localeCompare(pairName(b.pair_a_id))).map(m=>`<tr><td>${esc(m.group_name||'—')}</td><td>${esc(pairName(m.pair_a_id))}</td><td>${esc(pairName(m.pair_b_id))}</td><td>${esc(m.status)}</td></tr>`).join('');
+    return header+`<div class="notice blue"><b>生成済み・既存データあり</b>：試合${existing.length}件／予選${preliminary.length}件。再生成や上書きはできません。</div><div class="tablebox"><table class="tbl"><thead><tr><th>組</th><th>ペアA</th><th>ペアB</th><th>状態</th></tr></thead><tbody>${rows||'<tr><td colspan="4">予選試合は未登録です。</td></tr>'}</tbody></table></div>${drawPreview.message?`<p class="${drawPreview.success?'notice blue':'empty-error'}" role="status">${esc(drawPreview.message)}</p>`:''}</div>`;
+  }
+  const list=(plan.groups||[]).map(g=>{const ms=plan.matches.filter(m=>m.group===g);return `<details class="card" open><summary><b>${esc(g)}組：${ms.length}試合</b></summary><ol>${ms.map(m=>`<li>${esc(m.a.display_name)} 対 ${esc(m.b.display_name)}</li>`).join('')}</ol></details>`;}).join('');
+  return header+summary+list+`<button type="button" class="btn wide" id="generatePreliminaryMatches" ${eligible?'':'disabled'}>${drawPreview.busy?'生成中…':'予選対戦表を生成して保存'}</button>${!eligible?`<p class="prompt" role="status">生成できない理由：${esc(reason)}</p>`:''}${drawPreview.message?`<div class="${drawPreview.success?'notice blue':'empty-error'}" role="status">${esc(drawPreview.message)}</div>`:''}<p class="prompt">プレビューは組内の名前順で表示しています。サーバーが対戦カードを作成するため、保存後は組み合わせを順不同で照合します。実際の抽選順・試合順やコート・時間割はまだ決定しません。</p></div>`;
+}
+async function generatePreliminaryMatches(){
+  if(drawPreview.busy)return;
+  const tid=categoryForm.tournamentId,t=state.tournaments.find(x=>x.id===tid);
+  const cat=state.categories.find(c=>c.id===drawPreview.categoryId&&c.tournament_id===tid);
+  const plan=drawPlan(t,cat);
+  if(!drawEligible(t,cat,plan)){drawPreview.message='保存前チェックを通過できませんでした。「更新」で確認してください。';drawPreview.success=false;render();return;}
+  if(!confirm(`予選対戦表を生成して保存しますか？\n大会：${t.name}\nカテゴリー：${cat.name}\n有効ペア：${plan.active.length}\n組：${plan.groups.map((g,i)=>g+'組 '+plan.sizes[i]+'ペア').join(' ／ ')}\n生成予定：${plan.matches.length}試合\n\n確定後、この画面から再生成・上書きはできません。`))return;
+  drawPreview.busy=true;drawPreview.message='';drawPreview.success=false;render();
+  try{
+    // Refresh immediately before RPC to avoid proceeding on a stale UI snapshot.
+    await loadData();
+    if(state.error||state.loading||categoryForm.tournamentId!==tid||drawPreview.categoryId!==cat.id)throw Error('対象またはデータの再確認に失敗しました。');
+    const latestT=state.tournaments.find(x=>x.id===tid),latestC=state.categories.find(c=>c.id===cat.id&&c.tournament_id===tid);
+    const latestPlan=drawPlan(latestT,latestC);
+    const key=m=>[m.group,...[m.a.id,m.b.id].sort()].join('|');
+    const expected=new Set(plan.matches.map(key)),fresh=new Set((latestPlan.matches||[]).map(key));
+    if(!drawEligible(latestT,latestC,latestPlan,true)||expected.size!==plan.matches.length||fresh.size!==expected.size||[...expected].some(k=>!fresh.has(k)))throw Error('組分け・試合・権限の状態が変わりました。');
+    const {data:created,error:rpcError}=await client.rpc('admin_generate_preliminary_matches',{p_category_id:cat.id});
+    if(rpcError)throw Error(rpcError.message);
+    if(Number(created)!==expected.size)throw Error('RPCの生成件数が一致しません。');
+    const [matchResult,stageResult]=await Promise.all([
+      client.from('matches').select('id,category_id,stage_id,group_name,pair_a_id,pair_b_id,status,court_id,start_time,score_a,score_b').eq('category_id',cat.id),
+      client.from('competition_stages').select('id,category_id,stage_type').eq('category_id',cat.id)
+    ]);
+    if(matchResult.error||stageResult.error||!matchResult.data||!stageResult.data)throw Error('生成後のDB再取得に失敗しました。');
+    const stages=stageResult.data,ms=matchResult.data,stage=stages.length===1?stages[0]:null;
+    const actual=ms.map(m=>[m.group_name,...[m.pair_a_id,m.pair_b_id].sort()].join('|'));
+    if(!stage||stage.stage_type!=='preliminary'||ms.length!==expected.size||actual.length!==new Set(actual).size||actual.some(k=>!expected.has(k))||ms.some(m=>m.stage_id!==stage.id||m.status!=='scheduled'||m.court_id!=null||m.start_time!=null||m.score_a!=null||m.score_b!=null))throw Error('生成後の対戦カードまたは未割当状態が一致しません。');
+    await loadData();
+    if(state.error)throw Error('保存済みの可能性がありますが、画面の更新に失敗しました。');
+    drawPreview.success=true;drawPreview.message=`生成・照合完了：${ms.length}試合／${plan.groups.length}組。Supabaseの対戦カードを照合しました。`;
+  }catch(e){drawPreview.success=false;drawPreview.message='保存結果を確認できませんでした：'+e.message+'。再実行しないで「更新」後に既存試合をご確認ください。';}
+  finally{drawPreview.busy=false;render();}
+}
+
 function manage(){
  if(!canOpenManage())return '<div class="notice">大会管理権限を確認できません。再ログインまたは更新してください。</div>';
  const sysAdmin=state.systemAdminLoaded&&state.systemAdmin&&!state.systemAdminError;
@@ -844,7 +932,7 @@ function manage(){
   recruitment:()=>`${capacityPlanningSection(t,existing,capacity)}${categoryScheduleWindowsSection(t,existing,officialCourts.length)}${flexibleSchedulePlanningSection(t,existing,officialCourts.length)}<details class="card"><summary><b>旧シミュレーション・募集枠の自動提案（参考）</b></summary><p class="prompt">カテゴリー別開催枠に対応しない旧方式です。参考確認のみ行ってください。</p>${schedulePlanningSection(t,existing,officialCourts.length,capacity!==null)}${recruitmentOptimizationSection(t,existing,officialCourts.length,capacity)}</details>`,
   entries:()=>`${pairImportSection()}${pairManageSection()}`,
   groups:()=>groupingPreviewSection(t,existing),
-  draw:()=>prepPlaceholder('対戦表生成・再生成','既存試合番号と確定結果を維持する差分再生成は未実装です'),
+  draw:()=>drawSection(t,existing),
   schedule:()=>prepPlaceholder('実試合の時間割生成','現在の可変コート割当は募集前の仮シミュレーションであり、実試合への保存は未実装です'),
   publish:()=>prepPlaceholder('公開前検証・公開・印刷','未配置試合などの検証と公開、紙用PDFの発行は未実装です')
  };
@@ -1361,7 +1449,7 @@ function render(){if(areaOf(state.tab)==='ops'&&!state.staff)state.tab='public_h
  if(pending)pending.onchange=()=>{matchListFilter.pendingOnly=pending.checked;updateMatchListResults()};
  if(clear)clear.onclick=()=>{matchListFilter.query='';if(search){search.value='';search.focus()}updateMatchListResults()};
  updateMatchListResults();
- }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const gpc=$('groupPreviewCategory');if(gpc)gpc.onchange=()=>{groupingPreview.categoryId=gpc.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpm=$('groupPreviewMode');if(gpm)gpm.onchange=()=>{groupingPreview.mode=gpm.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpn=$('groupPreviewCount');if(gpn)gpn.onchange=()=>{groupingPreview.groupCount=gpn.value;groupingPreview.message='';render()};const gps=$('savePreliminaryGroups');if(gps)gps.onclick=savePreliminaryGroups;const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
+ }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const gpc=$('groupPreviewCategory');if(gpc)gpc.onchange=()=>{groupingPreview.categoryId=gpc.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpm=$('groupPreviewMode');if(gpm)gpm.onchange=()=>{groupingPreview.mode=gpm.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpn=$('groupPreviewCount');if(gpn)gpn.onchange=()=>{groupingPreview.groupCount=gpn.value;groupingPreview.message='';render()};const gps=$('savePreliminaryGroups');if(gps)gps.onclick=savePreliminaryGroups;const dc=$('drawCategory');if(dc)dc.onchange=()=>{drawPreview.categoryId=dc.value;drawPreview.message='';render()};const dg=$('generatePreliminaryMatches');if(dg)dg.onclick=generatePreliminaryMatches;const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
 async function fetchAll(name,columns='*',order='id'){let out=[],from=0;for(;;){let q=client.from(name).select(columns).range(from,from+499);if(order)q=q.order(order,{ascending:true});let {data,error}=await q;if(error)throw Error(name+' : '+error.message);out.push(...(data||[]));if(!data||data.length<500)break;from+=500;if(from>=10000)throw Error(name+' : 10000行超のため取得を停止しました')}return out}
 let matchNumberLoadVersion=0;
 async function refreshMatchNumbers(){
