@@ -151,6 +151,34 @@ function applyRecruitmentSuggestion(){
  recruitmentOptimization.result=null;render();
 }
 
+// STEP 175: conservative per-category lower bounds for the final stage.
+// These are necessary-time checks, not a proof that a full schedule fits.
+function finalStageTimeDiagnostics(categories,run,matchMinutes,restMinutes,maxConsecutive){
+ const prelimEnd=run?.preliminaryEndMinute;
+ const earliest=run?.knockoutEarliestMinute;
+ const deadline=run?.deadlineMinute;
+ if(!Number.isFinite(prelimEnd)||!Number.isFinite(earliest)||!Number.isFinite(deadline))return '';
+ const slotGap=matchMinutes*Math.max(1,Math.ceil((matchMinutes+restMinutes)/matchMinutes));
+ const clock=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+ const rows=categories.map(c=>{
+  const r=planGroupings(c.pairs,c.advance,c.groupMax,c.finalFormat||'knockout');
+  if(!r)return null;
+  const n=r.qualifiers,format=c.finalFormat||'knockout';
+  // In a round robin every finalist plays n-1 games. A knockout champion
+  // must play at least floor(log2(n)) games (BYE may shorten the path).
+  const games=format==='round_robin'?Math.max(0,n-1):n<2?0:Math.floor(Math.log2(n));
+  // If consecutive games are forbidden, a gap of one slot is also required.
+  const gap=restMinutes>0||maxConsecutive===1?Math.max(slotGap,matchMinutes*2):matchMinutes;
+  const minDuration=games?matchMinutes+(games-1)*gap:0;
+  const earliestFinish=earliest+minDuration;
+  return {name:c.name,format,games,minDuration,earliestFinish,shortfall:Math.max(0,earliestFinish-deadline)};
+ }).filter(Boolean);
+ const failures=rows.filter(r=>r.shortfall>0);
+ const headline=failures.length?'決勝の最低必要時間だけで公式戦終了期限を超過しています。':'決勝の最低必要時間だけでは時間不足を確認できません。実際の配置可否は別途検証が必要です。';
+ const table=rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.format==='round_robin'?'総当たり':'トーナメント'}</td><td>${r.games}試合／ペア（下限）</td><td>${r.minDuration}分</td><td>${clock(r.earliestFinish)}</td><td>${r.shortfall?`<b>${r.shortfall}分不足</b>`:'下限内'}</td></tr>`).join('');
+ return `<div class="notice ${failures.length?'':'blue'}"><b>決勝の最低必要時間チェック</b><p>${esc(headline)}</p><p class="prompt">全予選終了 ${clock(prelimEnd)} ／ 決勝開始可能 ${clock(earliest)} ／ 公式戦終了期限 ${clock(deadline)}</p><div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>決勝形式</th><th>1ペアの必要試合</th><th>最短所要</th><th>最早終了</th><th>判定</th></tr></thead><tbody>${table}</tbody></table></div><p class="prompt">決勝開始可能時刻からの理論的な下限です。コートの競合、他ペアとの対戦順、予選後の個別休憩、実選手のダブルエントリーは考慮していません。下限内でも配置成功は保証されません。トーナメントの必要試合数はBYEを考慮した最短経路の下限です。</p></div>`;
+}
+
 function schedulePlanningSection(t,categories,officialCourtCount,ready){
  if(!t||!categories.length)return '';
  const validPlans=categories.map(c=>{const p=getCapacityPlan(t.id,c.id),r=planGroupings(p.pairs,p.advance,p.groupSize,p.finalFormat||'knockout');return r?{name:c.name,pairs:Number(p.pairs),groupMax:Number(p.groupSize),advance:Number(p.advance),finalFormat:p.finalFormat||'knockout'}:null});
@@ -171,7 +199,7 @@ function schedulePlanningSection(t,categories,officialCourtCount,ready){
    const timing=worst?`<div class="metrics"><div class="metric"><small>予選終了予定</small><strong>${fmt(worst.preliminaryEndMinute)}</strong></div><div class="metric"><small>決勝開始可能</small><strong>${fmt(worst.knockoutEarliestMinute)}</strong></div><div class="metric"><small>全試合終了予定</small><strong>${fmt(worst.finishMinute)}</strong></div></div><p class="prompt">公式戦終了期限 ${fmt(deadline)} ／ 残り時間 ${deadline-worst.finishMinute}分（成功した仮シナリオの中で最も遅いケース）</p>`:'';
    const complete=fullyScheduled.length===runs.length;
    const message=complete?'仮の勝ち上がり4パターンすべてで時間内に配置できました。':`4パターン中${fullyScheduled.length}パターンで配置できました。配置失敗は開催不可能を意味しません。`;
-   output=`<div class="notice ${complete?'blue':''}"><b>${esc(message)}</b></div>${timing}<p class="prompt">パターン別：${runs.map((r,i)=>`ケース${i+1} ${r.status==='fits_scenario'?fmt(r.finishMinute):'未配置 '+esc(r.unscheduled??'?')+'試合'}`).join(' ／ ')}</p>`;
+   output=`<div class="notice ${complete?'blue':''}"><b>${esc(message)}</b></div>${timing}<p class="prompt">パターン別：${runs.map((r,i)=>`ケース${i+1} ${r.status==='fits_scenario'?fmt(r.finishMinute):'未配置 '+esc(r.unscheduled??'?')+'試合'}`).join(' ／ ')}</p>${finalStageTimeDiagnostics(validPlans,runs.find(r=>Number.isFinite(r.preliminaryEndMinute)),minutes,rest,maxConsecutive)}`;
   }catch(err){output=`<div class="empty-error">シミュレーションできません：${esc(err.message)}</div>`;}
  }
  return `<h2>仮スケジュールの実現性チェック</h2><div class="card stack"><div><label for="qualificationMinutes">予選終了から決勝開始までの確認時間（分）</label><select class="field" id="qualificationMinutes">${[0,10,15,20,30,45,60].map(n=>opt(String(n),`${n}分`,String(qualificationMinutes))).join('')}</select></div><p class="prompt">休憩 ${esc(rest)}分、最大連続試合 ${esc(maxConsecutive)}試合、公式戦コート ${esc(officialCourtCount)}面。運営用の120分は大会終了時刻側に確保する仮定です。</p>${output}<p class="prompt">これは募集段階の仮ペアと仮の勝敗による4パターンの試算です。全パターンの保証ではありません。ダブルエントリー、進行遅延は未反映。配置は簡易探索のため、未配置でも開催不可能とは限りません。Supabaseへの保存はありません。</p></div>`;
