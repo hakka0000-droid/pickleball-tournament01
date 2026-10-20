@@ -758,9 +758,23 @@ function groupSaveDiagnosticSection(t,cat,active,selected){
     ['決勝対戦枠がない',bracket.length===0,`決勝対戦枠 ${bracket.length}件`],
     ['既存の組分けがない',savedAssignments===0,`組分け登録済み ${savedAssignments}ペア`]
   ];
+  // STEP 22-6-9-46: Compare displayed category IDs with in-memory official-result IDs.
+  // Read-only; deliberately shows no names, login details, player IDs, or auth tokens.
+  const officialRows=state.officialResults.map((r,i)=>{
+    const raw=r.category_id;
+    const normalized=String(raw??'').trim().toLowerCase();
+    const target=String(cat.id??'').trim().toLowerCase();
+    return `<tr><td>${i+1}</td><td style="overflow-wrap:anywhere">${esc(raw)}</td><td>${normalized===target?'一致':'不一致'}</td><td>${esc(r.status||'未設定')}</td></tr>`;
+  }).join('');
+  const idCrosscheck=`<h3 style="margin-top:16px">カテゴリーIDの照合（読み取り専用）</h3>
+    <p class="prompt">画面の対象大会ID：<code>${esc(t.id)}</code></p>
+    <p class="prompt">画面の対象カテゴリーID：<code>${esc(cat.id)}</code></p>
+    <p class="prompt">正式結果の全取得件数：${state.officialResults.length}件／対象カテゴリーに完全一致：${official.length}件</p>
+    <div class="tablebox"><table class="tbl"><thead><tr><th>行</th><th>正式結果のカテゴリーID</th><th>対象IDとの比較</th><th>状態</th></tr></thead><tbody>${officialRows||'<tr><td colspan="4">取得結果なし</td></tr>'}</tbody></table></div>
+    <p class="prompt">診断専用表示です。サーバーへの通信・保存処理・権限制御は変更していません。</p>`;
   const rows=statuses.map(([label,ok,detail])=>`<tr><td>${esc(label)}</td><td><b>${ok?'OK':'要確認'}</b></td><td style="white-space:normal;overflow-wrap:anywhere">${esc(ok?'—':detail||'状態を確認してください')}</td></tr>`).join('');
   const issues=statuses.filter(x=>!x[1]).length;
-  return `<details class="card" id="groupSaveDiagnostics" open><summary><b>保存前チェックの診断結果（読み取り専用）／要確認 ${issues}項目</b></summary><p class="prompt">保存条件の各判定を表示します。個人情報・ログイン情報は表示しません。権限制御・保存処理・DBは変更していません。</p><div class="tablebox"><table class="tbl"><thead><tr><th>確認項目</th><th>状態</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+  return `<details class="card" id="groupSaveDiagnostics" open><summary><b>保存前チェックの診断結果（読み取り専用）／要確認 ${issues}項目</b></summary><p class="prompt">保存条件の各判定を表示します。個人情報・ログイン情報は表示しません。権限制御・保存処理・DBは変更していません。</p><div class="tablebox"><table class="tbl"><thead><tr><th>確認項目</th><th>状態</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>${idCrosscheck}</details>`;
 }
 
 function groupingPreviewSection(t,categories){
