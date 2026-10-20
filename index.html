@@ -45,13 +45,14 @@
 <nav class="bottom" id="bottom"></nav><div id="overlay"></div>
 <script src="./supabase-config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const opt=(value,label,selected)=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`;
 const CONF=window.PICKLEBALL_SUPABASE_CONFIG||{};
-const TABS=[['home','概要'],['matches','試合一覧'],['courts','コート別'],['bracket','決勝トーナメント'],['ranking','順位'],['pairs','ペア検索'],['manage','大会管理']];
+const TABS=[['home','概要'],['matches','試合一覧'],['courts','コート別'],['bracket','決勝トーナメント'],['ranking','順位'],['pairs','参加ペア'],['manage','大会管理']];
 const state={tab:'home',loading:false,error:'',auth:null,staff:false,staffError:'',systemAdmin:false,systemAdminLoaded:false,systemAdminError:'',tournamentAdminIds:[],tournamentAdminLoaded:false,tournamentAdminError:'',tournaments:[],categories:[],stages:[],pairs:[],matches:[],courts:[],category:'all',tournament:'all',pair:'',group:'',rankings:[],approved:[],rankingError:'',bracketError:'',bracketSlots:[],officialResults:[],officialError:"",officialLoaded:false,rankingRows:{},rankingLoadErrors:{},rankingLoading:false,approvedLoaded:false,approvedError:'',qualificationLocks:[],qualificationLocksLoaded:false,qualificationLocksError:'',courtLoadError:'',lastLoaded:null};
 const categoryForm={tournamentId:'9809c9a9-aec9-44fb-bcfc-e186e69cef51',selectedLevels:[1],division:'フリー',displayOrder:0};
 const CATEGORY_LEVELS=['初心者','初級','初中級','中級','中上級','上級'];
@@ -706,8 +707,127 @@ function resolveRankingModal(key){
   try{const {error}=await client.rpc('admin_resolve_group_ranking_ties',{p_category_id:g.cat,p_group_name:g.group,p_ordered_pair_ids:ordered,p_reason:reason});if(error)throw error;closeModal();await loadData();alert('同順位を解決し、順位を正式承認しました。')}catch(e){if($('rankingMsg')){$('rankingMsg').textContent='確定に失敗しました：'+e.message;$('rankingMsg').classList.remove('hide')}if(b.isConnected)b.disabled=false;await refreshRankings()}
  };
 }
-function pairs(){const ps=state.pairs.filter(p=>state.category==='all'||p.category_id===state.category).filter(p=>state.tournament==='all'||state.categories.find(c=>c.id===p.category_id)?.tournament_id===state.tournament);const selected=ps.find(p=>p.id===state.pair)||ps[0];return `${controls()}<h2>ペア別試合検索</h2><label>ペアを選択</label><select class="field" id="pairFilter">${ps.map(p=>opt(p.id,p.display_name,selected?.id)).join('')}</select>${selected?`<div class="card"><b>${esc(selected.display_name)}</b> <small class="muted">${esc(catName(selected.category_id))}</small></div><div class="grid">${visibleMatches().filter(m=>m.pair_a_id===selected.id||m.pair_b_id===selected.id).map(matchCard).join('')||'<div class="empty">試合がありません。</div>'}</div>`:'<div class="empty">ペアがありません。</div>'}`}
-function render(){navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':({home,matches,courts,bracket,ranking,pairs,manage})[state.tab]();$('screen').innerHTML=top+content+'<footer>v10開発プレビュー｜V9画面デザインを踏襲</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));document.querySelectorAll('[data-official-confirm]').forEach(b=>b.onclick=()=>confirmOfficial(b.dataset.officialConfirm));document.querySelectorAll('[data-official-revoke]').forEach(b=>b.onclick=()=>revokeOfficial(b.dataset.officialRevoke));document.querySelectorAll('[data-ranking-approve]').forEach(b=>b.onclick=()=>approveRanking(b.dataset.rankingApprove));document.querySelectorAll('[data-ranking-revoke]').forEach(b=>b.onclick=()=>revokeRanking(b.dataset.rankingRevoke));document.querySelectorAll('[data-ranking-resolve]').forEach(b=>b.onclick=()=>resolveRankingModal(b.dataset.rankingResolve));wireControls();const cf=$('createTournamentForm');if(cf)cf.onsubmit=createTournament;const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const ct=$('manageTournament');if(ct)ct.onchange=()=>{categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
+// STEP 277: XLSX/CSV import preview and one atomic admin_import_pairs RPC.
+const pairImport={tournamentId:'',fileName:'',rows:[],fileErrors:[],message:'',busy:false};
+const normalizePairKey=(a,b)=>[String(a).trim().toLocaleLowerCase(),String(b).trim().toLocaleLowerCase()].sort().join('\u0000');
+const importColumns=['カテゴリー','選手1','選手2','女性選手数'];
+function csvCells(text){
+  const rows=[];let row=[],cell='',quoted=false;
+  text=String(text).replace(/^\uFEFF/,'');
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(quoted){if(c==='"'&&text[i+1]==='"'){cell+='"';i++;}else if(c==='"'){quoted=false;}else cell+=c;}
+    else if(c==='"'){if(cell!=='')throw Error('CSVの引用符の位置が不正です。');quoted=true;}
+    else if(c===','){row.push(cell);cell='';}
+    else if(c==='\r'||c==='\n'){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);rows.push(row);row=[];cell='';}
+    else cell+=c;
+  }
+  if(quoted)throw Error('CSVの引用符が閉じられていません。');
+  if(cell!==''||row.length){row.push(cell);rows.push(row);}
+  return rows;
+}
+function csvFromRows(rows){return rows.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');}
+function pairImportCheck(){
+  const t=state.tournaments.find(x=>x.id===pairImport.tournamentId);
+  const issues=[],prepared=[],batch=new Set();
+  if(!canManageCategories()||!state.tournamentAdminIds.includes(t?.id)||t?.status!=='draft')issues.push('この大会で一括登録できる管理者権限、または下書き状態を確認できません。');
+  if(!state.officialLoaded||state.officialError||!state.approvedLoaded||state.approvedError||!state.qualificationLocksLoaded||state.qualificationLocksError||state.bracketError)issues.push('試合・順位・確定情報を取得できません。更新してください。');
+  if(pairImport.rows.length<1||pairImport.rows.length>256)issues.push('登録件数は1〜256ペアにしてください。');
+  const categories=state.categories.filter(c=>c.tournament_id===pairImport.tournamentId);
+  const existingByCat=new Map();
+  for(const p of state.pairs){if(!existingByCat.has(p.category_id))existingByCat.set(p.category_id,[]);existingByCat.get(p.category_id).push(p);}
+  for(const row of pairImport.rows){
+    const errors=[];
+    const cname=String(row.category??'').trim(),p1=String(row.player1??'').trim(),p2=String(row.player2??'').trim(),femaleRaw=String(row.female??'').trim();
+    const matching=categories.filter(c=>c.name.trim()===cname);
+    const cat=matching.length===1?matching[0]:null;
+    if(!cat)errors.push(`カテゴリー「${cname}」が大会内に1件だけ存在することを確認してください`);
+    if(!p1||!p2||[p1,p2].some(n=>Array.from(n).length>100))errors.push('選手名は必須・各100文字以内です');
+    if(p1&&p2&&p1.toLocaleLowerCase()===p2.toLocaleLowerCase())errors.push('選手1と選手2が同じです');
+    if(!['0','1','2'].includes(femaleRaw))errors.push('女性選手数は0・1・2のいずれかです');
+    if(cat){
+      if(cat.planned_pairs==null)errors.push('カテゴリーの募集枠が未設定です');
+      const key=cat.id+'|'+normalizePairKey(p1,p2);
+      if(batch.has(key))errors.push('ファイル内に同じペアがあります（順不同）');
+      batch.add(key);
+      if((existingByCat.get(cat.id)||[]).some(p=>normalizePairKey(p.player1,p.player2)===normalizePairKey(p1,p2)))errors.push('DBに登録済みのペアです（辞退・失格を含む）');
+      if(state.matches.some(m=>m.category_id===cat.id)||state.approved.some(a=>a.category_id===cat.id)||state.qualificationLocks.includes(cat.id)||state.officialResults.some(r=>r.category_id===cat.id))errors.push('試合・承認・確定済みのデータがあるカテゴリーです');
+    }
+    prepared.push({line:row.line,category:cname,categoryId:cat?.id,player1:p1,player2:p2,female:femaleRaw,errors});
+  }
+  for(const cat of categories){
+    const added=prepared.filter(r=>r.categoryId===cat.id).length;
+    if(!added)continue;
+    const active=(existingByCat.get(cat.id)||[]).filter(p=>p.participation_status==='active').length;
+    if(cat.planned_pairs!=null&&active+added>Number(cat.planned_pairs))issues.push(`「${cat.name}」：募集枠${cat.planned_pairs}ペアに対し既存${active}＋追加${added}ペアです。`);
+  }
+  return {issues,prepared,errorCount:issues.length+prepared.reduce((n,r)=>n+r.errors.length,0)};
+}
+function pairImportSection(){
+  const allowed=state.tournaments.filter(t=>state.tournamentAdminIds.includes(t.id));
+  if(!canManageCategories()||!allowed.length)return '';
+  if(!allowed.some(t=>t.id===pairImport.tournamentId))pairImport.tournamentId=allowed.find(t=>t.status==='draft')?.id||allowed[0].id;
+  const t=allowed.find(x=>x.id===pairImport.tournamentId);
+  const assessment=pairImport.rows.length?pairImportCheck():null;
+  const errors=assessment?.errorCount||0;
+  const info=pairImport.fileErrors.length?`<div class="empty-error">${pairImport.fileErrors.map(esc).join(' ／ ')}</div>`:'';
+  const summary=assessment?`<p class="prompt">読み込み ${pairImport.rows.length}件 ／ ${errors===0?'入力エラーなし':`エラー ${errors}件`}</p>${assessment.issues.map(x=>`<div class="empty-error">${esc(x)}</div>`).join('')}<div class="tablebox"><table class="tbl"><thead><tr><th>行</th><th>カテゴリー</th><th>選手1</th><th>選手2</th><th>女性選手数</th><th>判定</th></tr></thead><tbody>${assessment.prepared.map(r=>`<tr><td>${r.line}</td><td>${esc(r.category)}</td><td>${esc(r.player1)}</td><td>${esc(r.player2)}</td><td>${esc(r.female)}</td><td>${r.errors.length?`<span style="color:#a33">${esc(r.errors.join(' / '))}</span>`:'OK'}</td></tr>`).join('')}</tbody></table></div>`:'';
+  return `<h2>参加ペア一括登録（管理者用）</h2><div class="card stack"><p class="prompt">Excel（.xlsx）またはCSVを読み込み、登録前に全行を検証します。既存ペアは削除・置換せず、追加のみ行います。上限256行。実際の登録時もサーバー側で全件再検証します。</p><div><label for="pairImportTournament">登録先大会</label><select class="field" id="pairImportTournament">${allowed.map(x=>opt(x.id,x.name,pairImport.tournamentId)).join('')}</select></div>${t?.status!=='draft'?'<div class="notice">下書き以外の大会には登録できません。</div>':''}<button class="btn secondary mini-btn" id="pairTemplateDownload">CSVテンプレートを保存</button><div><label for="pairImportFile">Excel・CSVファイル</label><input class="field" id="pairImportFile" type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ${pairImport.busy?'disabled':''}></div><p class="prompt">列：カテゴリー／選手1／選手2／女性選手数。カテゴリー名は大会に登録されている名称と完全一致させてください。Excelは先頭シートを使用します。${pairImport.fileName?' 読み込み中のファイル：'+esc(pairImport.fileName):''}</p>${info}${summary}${pairImport.message?`<div class="${pairImport.message.startsWith('登録完了')?'notice blue':'empty-error'}" role="status">${esc(pairImport.message)}</div>`:''}<button class="btn wide" id="pairImportSubmit" ${assessment&&errors===0&&!pairImport.busy&&t?.status==='draft'&&!pairImport.fileErrors.length?'':'disabled'}>${pairImport.busy?'登録・照合中…':`確認した${pairImport.rows.length||0}ペアを一括登録`}</button><p class="prompt">重要：試合・順位・確定データがあるカテゴリーへの追加は現段階では禁止しています。対戦表再生成・登録後編集は後続STEPで実装します。</p></div>`;
+}
+async function readPairImportFile(file){
+  if(!file||pairImport.busy)return;
+  pairImport.fileName=file.name;pairImport.fileErrors=[];pairImport.rows=[];pairImport.message='';
+  try{
+    if(file.size>3*1024*1024)throw Error('ファイルは3MB以下にしてください。');
+    let grid;
+    if(/\.csv$/i.test(file.name))grid=csvCells(await file.text());
+    else if(/\.xlsx$/i.test(file.name)){
+      if(!window.XLSX)throw Error('Excel読み込みライブラリを取得できません。CSV形式で保存し直すかネットワークを確認してください。');
+      const book=window.XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:false});
+      if(!book.SheetNames.length)throw Error('Excelにシートがありません。');
+      grid=window.XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1,defval:'',blankrows:true,raw:false});
+    }else throw Error('対応形式は .xlsx と .csv です。');
+    if(!grid.length)throw Error('ファイルが空です。');
+    const header=grid[0].map(x=>String(x??'').trim().replace(/^\uFEFF/,''));
+    if(header.length!==4||header.some((v,i)=>v!==importColumns[i]))throw Error('先頭行は「カテゴリー,選手1,選手2,女性選手数」の4列にしてください。');
+    for(let i=1;i<grid.length;i++){
+      const r=grid[i];if(r.every(v=>String(v??'').trim()===''))continue;
+      if(r.length>4&&r.slice(4).some(v=>String(v??'').trim()!==''))throw Error(`${i+1}行目に5列目以降のデータがあります。`);
+      pairImport.rows.push({line:i+1,category:r[0],player1:r[1],player2:r[2],female:r[3]});
+    }
+    if(pairImport.rows.length<1||pairImport.rows.length>256)throw Error('データは1〜256ペアにしてください。');
+  }catch(e){pairImport.rows=[];pairImport.fileErrors=[e.message];}
+  render();
+}
+function downloadPairImportTemplate(){
+  const text='\uFEFF'+csvFromRows([importColumns,['初級／フリー','山田太郎','佐藤一郎','0']]);
+  const blob=new Blob([text],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob);
+  const link=document.createElement('a');link.href=url;link.download='参加ペア一括登録テンプレート.csv';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function submitPairImport(){
+  if(pairImport.busy||!client||!pairImport.rows.length)return;
+  const tid=pairImport.tournamentId,assessment=pairImportCheck();
+  if(assessment.errorCount||pairImport.fileErrors.length){pairImport.message='入力エラーを解消してください。';render();return;}
+  if(!confirm(`「${state.tournaments.find(t=>t.id===tid)?.name}」に${assessment.prepared.length}ペアを追加登録しますか？\n既存のペアを上書きしません。`))return;
+  pairImport.busy=true;pairImport.message='';render();
+  try{
+    // Re-fetch authoritative snapshots immediately before the write.
+    await loadData();
+    if(state.error||pairImport.tournamentId!==tid)throw Error('大会の読み込み状態が変更されました。');
+    const check=pairImportCheck();if(check.errorCount)throw Error('DB再取得後の検証でエラーが見つかりました。プレビューを確認してください。');
+    const entries=check.prepared.map(r=>({category_id:r.categoryId,player1:r.player1,player2:r.player2,female_count:Number(r.female)}));
+    const {data,error}=await client.rpc('admin_import_pairs',{p_tournament_id:tid,p_entries:entries});
+    if(error)throw error;
+    if(Number(data)!==entries.length)throw Error('登録件数が一致しません。更新して登録状況を確認してください。');
+    await loadData();if(state.error)throw Error('保存後のデータ再取得に失敗しました。');
+    const counts=new Map();for(const r of entries){const key=r.category_id+'|'+normalizePairKey(r.player1,r.player2);counts.set(key,(counts.get(key)||0)+1);}
+    for(const [key,count] of counts){const matches=state.pairs.filter(p=>p.category_id+'|'+normalizePairKey(p.player1,p.player2)===key);if(matches.length!==count)throw Error('保存結果の照合に失敗しました。更新して一覧を確認してください。');}
+    pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message=`登録完了：${entries.length}ペアを保存し、DBの値を照合しました。`;
+  }catch(e){pairImport.message='登録結果を確認できませんでした：'+e.message+'。二重登録を避けるため再実行前に更新してDBの登録状況を確認してください。';}
+  finally{pairImport.busy=false;render();}
+}
+function pairs(){const ps=state.pairs.filter(p=>state.category==='all'||p.category_id===state.category).filter(p=>state.tournament==='all'||state.categories.find(c=>c.id===p.category_id)?.tournament_id===state.tournament);const selected=ps.find(p=>p.id===state.pair)||ps[0];return `${pairImportSection()}${controls()}<h2>ペア別試合検索</h2><label>ペアを選択</label><select class="field" id="pairFilter">${ps.map(p=>opt(p.id,p.display_name,selected?.id)).join('')}</select>${selected?`<div class="card"><b>${esc(selected.display_name)}</b> <small class="muted">${esc(catName(selected.category_id))}</small></div><div class="grid">${visibleMatches().filter(m=>m.pair_a_id===selected.id||m.pair_b_id===selected.id).map(matchCard).join('')||'<div class="empty">試合がありません。</div>'}</div>`:'<div class="empty">ペアがありません。</div>'}`}
+function render(){navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':({home,matches,courts,bracket,ranking,pairs,manage})[state.tab]();$('screen').innerHTML=top+content+'<footer>v10開発プレビュー｜V9画面デザインを踏襲</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));document.querySelectorAll('[data-official-confirm]').forEach(b=>b.onclick=()=>confirmOfficial(b.dataset.officialConfirm));document.querySelectorAll('[data-official-revoke]').forEach(b=>b.onclick=()=>revokeOfficial(b.dataset.officialRevoke));document.querySelectorAll('[data-ranking-approve]').forEach(b=>b.onclick=()=>approveRanking(b.dataset.rankingApprove));document.querySelectorAll('[data-ranking-revoke]').forEach(b=>b.onclick=()=>revokeRanking(b.dataset.rankingRevoke));document.querySelectorAll('[data-ranking-resolve]').forEach(b=>b.onclick=()=>resolveRankingModal(b.dataset.rankingResolve));wireControls();const cf=$('createTournamentForm');if(cf)cf.onsubmit=createTournament;const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const ct=$('manageTournament');if(ct)ct.onchange=()=>{categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
 async function fetchAll(name,columns='*',order='id'){let out=[],from=0;for(;;){let q=client.from(name).select(columns).range(from,from+499);if(order)q=q.order(order,{ascending:true});let {data,error}=await q;if(error)throw Error(name+' : '+error.message);out.push(...(data||[]));if(!data||data.length<500)break;from+=500;if(from>=10000)throw Error(name+' : 10000行超のため取得を停止しました')}return out}
 async function loadData(){if(!client){state.error='Supabaseに接続できません。公開用設定を確認してください。';render();return}state.loading=true;state.error='';render();try{let [t,c,s,p,m]=await Promise.all([fetchAll('tournaments'),fetchAll('categories'),fetchAll('competition_stages'),fetchAll('pairs'),fetchAll('matches')]);state.tournaments=t;state.categories=c;hydrateCapacityPlans(c);state.stages=s;state.pairs=p;state.matches=m;state.bracketSlots=[];state.bracketError='';state.officialResults=[];state.officialError='';state.officialLoaded=false;const officialResult=await client.rpc('get_public_category_final_results');if(officialResult.error){state.officialError=officialResult.error.message}else{state.officialResults=officialResult.data||[];state.officialLoaded=true}const slotResult=await client.rpc('get_public_knockout_bracket_slots');if(slotResult.error){state.bracketError=slotResult.error.message}else{state.bracketSlots=slotResult.data||[]}state.courtLoadError='';try{state.courts=await fetchAll('courts','id,name,tournament_id,court_type,is_active');}catch(courtError){state.courts=[];state.courtLoadError=courtError.message;}state.lastLoaded=new Date()}catch(e){state.error='データ取得に失敗しました：'+e.message}finally{state.loading=false;render();if(!state.error)await refreshRankings()}}
 function closeModal(){ $('overlay').innerHTML='' }
