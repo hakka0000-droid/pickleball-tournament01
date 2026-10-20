@@ -62,7 +62,24 @@ const capacityPlanDirty=new Set();
 const capacityPlanSaving=new Set();
 const capacityPlanMessages={};
 const planKey=(t,c)=>`${t}:${c}`;
-function editCapacityPlan(t,c,field,value){getCapacityPlan(t,c)[field]=value;capacityPlanDirty.add(planKey(t,c));delete capacityPlanMessages[planKey(t,c)];}
+function capacityPlanMatchesSaved(t,c){
+ const category=state.categories.find(x=>x.id===c&&x.tournament_id===t);
+ if(!category)return false;
+ const saved=[category.planned_pairs,category.preliminary_group_max_pairs,category.qualifiers_per_group,category.final_format];
+ if(saved.some(v=>v===null||v===undefined))return false;
+ const plan=getCapacityPlan(t,c);
+ return Number(plan.pairs)===Number(saved[0])
+  &&Number(plan.groupSize)===Number(saved[1])
+  &&Number(plan.advance)===Number(saved[2])
+  &&plan.finalFormat===saved[3];
+}
+function editCapacityPlan(t,c,field,value){
+ getCapacityPlan(t,c)[field]=value;
+ const key=planKey(t,c);
+ if(capacityPlanMatchesSaved(t,c))capacityPlanDirty.delete(key);
+ else capacityPlanDirty.add(key);
+ delete capacityPlanMessages[key];
+}
 function hydrateCapacityPlans(categories){
  for(const c of categories){
   const key=planKey(c.tournament_id,c.id);
@@ -187,7 +204,8 @@ async function saveCapacityPlan(categoryId){
   Object.assign(category,data);
   // A user may change a field during an in-flight save: keep that unsaved edit.
   const current=getCapacityPlan(tid,categoryId);
-  if(Number(current.pairs)===values.pairs&&Number(current.groupSize)===values.groupSize&&Number(current.advance)===values.advance&&current.finalFormat===values.finalFormat)capacityPlanDirty.delete(key);
+  if(capacityPlanMatchesSaved(tid,categoryId))capacityPlanDirty.delete(key);
+  else capacityPlanDirty.add(key);
   capacityPlanMessages[key]={ok:true,text:'保存済み：Supabaseから4項目を再取得して照合しました。'};
  }catch(e){capacityPlanMessages[key]={ok:false,text:'保存結果を確認できませんでした：'+e.message+'。再保存の前に「更新」でDBの値を確認してください。'};}
  finally{capacityPlanSaving.delete(key);render();}
@@ -252,7 +270,7 @@ function capacityPlanningSection(t,categories,availableSlots){
   const plan=getCapacityPlan(t.id,c.id);
   const result=planGroupings(plan.pairs,plan.advance,plan.groupSize,plan.finalFormat||'knockout');
   const counts=[4,6,8,10,12,16,20,24,32];
-  const key=planKey(t.id,c.id),saving=capacityPlanSaving.has(key),dirty=capacityPlanDirty.has(key);
+  const key=planKey(t.id,c.id),saving=capacityPlanSaving.has(key),dirty=capacityPlanDirty.has(key)&&!capacityPlanMatchesSaved(t.id,c.id);
   const saved=[c.planned_pairs,c.preliminary_group_max_pairs,c.qualifiers_per_group,c.final_format].every(v=>v!==null&&v!==undefined);
   const status=dirty?'未保存の変更あり':saved?'DBに保存済み':'未保存（初期値）';
   const canSave=t.status==='draft'&&state.staff&&state.tournamentAdminIds.includes(t.id)&&!!result&&!saving&&!state.loading;
