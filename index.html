@@ -650,7 +650,7 @@ let prepPage='basic';
 let prepCreatingTournament=false;
 function prepPlaceholder(title,detail){return `<div class="card"><h3>${esc(title)}</h3><div class="notice">この工程は設計済み・未実装です。${esc(detail)}。実装前のため確定・公開操作はできません。</div></div>`;}
 // STEP 22-6-8: read-only preliminary grouping preview. Nothing is saved.
-const groupingPreview={mode:'demo',categoryId:'',groupCount:''};
+const groupingPreview={mode:'demo',categoryId:'',groupCount:'',busy:false,message:'',success:false};
 function balancedGroupOptions(n,max){
   if(!Number.isInteger(n)||n<3||!Number.isInteger(max)||max<3||max>6)return [];
   const out=[];
@@ -660,6 +660,72 @@ function balancedGroupOptions(n,max){
     if(sizes.every(v=>v>=3&&v<=max))out.push({count:k,sizes});
   }
   return out;
+}
+function groupLabel(i){
+  if(i<26)return String.fromCharCode(65+i);
+  return String.fromCharCode(64+Math.floor(i/26))+String.fromCharCode(65+i%26);
+}
+function groupingAssignments(participants,selected){
+  if(!selected)return [];
+  let offset=0;
+  return selected.sizes.flatMap((size,i)=>{
+    const label=groupLabel(i),part=participants.slice(offset,offset+size);
+    offset+=size;
+    return part.map(p=>({pair_id:p.id,group_name:label}));
+  });
+}
+function groupSaveEligible(t,cat,active,selected){
+  if(!client||!t||!cat||!selected||groupingPreview.mode!=='actual'||groupingPreview.busy||state.loading||state.error)return false;
+  if(t.status!=='draft'||!canManageCategories()||!state.tournamentAdminIds.includes(t.id))return false;
+  if(!state.approvedLoaded||state.approvedError||!state.qualificationLocksLoaded||state.qualificationLocksError||!state.officialLoaded||state.officialError||state.bracketError)return false;
+  if(state.matches.some(m=>m.category_id===cat.id)||state.approved.some(a=>a.category_id===cat.id)||state.qualificationLocks.includes(cat.id)||state.officialResults.some(r=>r.category_id===cat.id)||state.bracketSlots.some(s=>state.stages.some(st=>st.id===s.stage_id&&st.category_id===cat.id)))return false;
+  if(state.pairs.some(p=>p.category_id===cat.id&&p.group_name!==null&&p.group_name!==undefined))return false;
+  return active.length===selected.sizes.reduce((a,b)=>a+b,0);
+}
+async function savePreliminaryGroups(){
+  if(groupingPreview.busy||groupingPreview.mode!=='actual')return;
+  const tid=categoryForm.tournamentId,t=state.tournaments.find(x=>x.id===tid);
+  const cat=state.categories.find(c=>c.id===groupingPreview.categoryId&&c.tournament_id===tid);
+  if(!cat)return;
+  const participants=state.pairs.filter(p=>p.category_id===cat.id&&p.participation_status==='active')
+    .slice().sort((a,b)=>a.display_name.localeCompare(b.display_name,'ja')||a.id.localeCompare(b.id));
+  const choice=balancedGroupOptions(participants.length,Number(cat.preliminary_group_max_pairs))
+    .find(x=>String(x.count)===groupingPreview.groupCount);
+  if(!groupSaveEligible(t,cat,participants,choice)){
+    groupingPreview.message='保存条件を確認できません。更新して、既存組分けと確定状態をご確認ください。';groupingPreview.success=false;render();return;
+  }
+  const assignments=groupingAssignments(participants,choice);
+  if(new Set(assignments.map(a=>a.pair_id)).size!==participants.length){groupingPreview.message='組分けに重複があります。保存を中止しました。';render();return;}
+  const byGroup=choice.sizes.map((n,i)=>`${groupLabel(i)}組 ${n}ペア`).join(' ／ ');
+  if(!confirm(`予選組分けを確定してSupabaseに保存しますか？\n大会：${t.name}\nカテゴリー：${cat.name}\n有効ペア：${participants.length}\n${byGroup}\n\n確定後はこの画面から再保存・上書きできません。内容を必ずご確認ください。`))return;
+  groupingPreview.busy=true;groupingPreview.message='';groupingPreview.success=false;render();
+  try{
+    // Confirm the preview's exact pair IDs and unassigned state before sending the write.
+    const {data:latest,error:readError}=await client.from('pairs')
+      .select('id,category_id,participation_status,group_name,display_name')
+      .eq('category_id',cat.id);
+    if(readError||!latest)throw Error('保存前のペア再取得に失敗しました：'+(readError?.message||'データなし'));
+    if(latest.some(p=>p.group_name!=null))throw Error('既に組分けが保存されています。更新して確認してください。');
+    const fresh=latest.filter(p=>p.participation_status==='active').sort((a,b)=>a.display_name.localeCompare(b.display_name,'ja')||a.id.localeCompare(b.id));
+    if(fresh.length!==participants.length||fresh.some((p,i)=>p.id!==participants[i].id||p.display_name!==participants[i].display_name))throw Error('登録ペアがプレビュー時から変更されています。更新して組分けを確認してください。');
+    if(categoryForm.tournamentId!==tid||groupingPreview.categoryId!==cat.id||groupingPreview.mode!=='actual'||groupingPreview.groupCount!==String(choice.count))throw Error('画面の選択が変わりました。保存を中止しました。');
+    const {data:saved,error:rpcError}=await client.rpc('admin_save_preliminary_groups',{p_category_id:cat.id,p_assignments:assignments});
+    if(rpcError)throw Error(rpcError.message);
+    if(Number(saved)!==assignments.length)throw Error('RPCの保存件数が一致しません。');
+    const {data:verified,error:verifyError}=await client.from('pairs')
+      .select('id,category_id,participation_status,group_name').eq('category_id',cat.id);
+    if(verifyError||!verified)throw Error('保存後のDB照合に失敗しました：'+(verifyError?.message||'データなし'));
+    const expected=new Map(assignments.map(a=>[a.pair_id,a.group_name]));
+    const active=verified.filter(p=>p.participation_status==='active');
+    if(active.length!==expected.size||active.some(p=>!expected.has(p.id)||expected.get(p.id)!==p.group_name))throw Error('保存後のDB組分けがプレビューと一致しません。');
+    await loadData();
+    if(state.error)throw Error('組分けは保存された可能性がありますが、画面の再取得に失敗しました。');
+    groupingPreview.success=true;
+    groupingPreview.message=`確定保存完了：${assignments.length}ペア／${choice.count}組。Supabaseから再取得して照合しました。`;
+  }catch(e){
+    groupingPreview.success=false;
+    groupingPreview.message='保存結果を確認できませんでした：'+e.message+'。自動再送信はしません。「更新」でDBの組分け状況を確認してください。';
+  }finally{groupingPreview.busy=false;render();}
 }
 function groupingPreviewSection(t,categories){
   if(!t)return '<div class="notice">対象大会を選択してください。</div>';
@@ -675,10 +741,10 @@ function groupingPreviewSection(t,categories){
   if(!options.some(x=>String(x.count)===groupingPreview.groupCount))groupingPreview.groupCount=String(options[0]?.count??'');
   const selected=options.find(x=>String(x.count)===groupingPreview.groupCount);
   let offset=0;
-  const groups=selected?selected.sizes.map((size,i)=>{const members=participants.slice(offset,offset+size);offset+=size;return {name:String.fromCharCode(65+i),members};}):[];
+  const groups=selected?selected.sizes.map((size,i)=>{const members=participants.slice(offset,offset+size);offset+=size;return {name:groupLabel(i),members};}):[];
   const protectedData=state.matches.some(m=>m.category_id===cat.id)||state.approved.some(r=>r.category_id===cat.id)||state.qualificationLocks.includes(cat.id)||state.officialResults.some(r=>r.category_id===cat.id&&['confirmed','revoked'].includes(r.status));
   const grid=groups.map(g=>`<section class="card"><h3>${esc(g.name)}組 <span class="status">${g.members.length}ペア</span></h3><ol style="padding-left:25px;margin-bottom:3px">${g.members.map(p=>`<li style="padding:5px 0">${esc(p.display_name)}</li>`).join('')}</ol></section>`).join('');
-  return `<h2>予選組分け・プレビュー</h2><div class="notice blue"><b>閲覧・試算専用です。</b> この画面で組数を変更してもSupabaseには保存されません。組数は自動的に最小化せず、均等に割り振れる候補から管理者が選択します。</div>
+  return `<h2>予選組分け・プレビュー</h2><div class="notice blue"><b>組分けプレビュー：</b> 組数を変更しただけではSupabaseには保存されません。登録済みペアでは大会管理者が確認後に確定保存できます。組数は自動的に最小化せず、均等に割り振れる候補から管理者が選択します。</div>
     <div class="card stack"><div><label for="groupPreviewCategory">対象カテゴリー</label><select class="field" id="groupPreviewCategory">${categories.map(c=>opt(c.id,c.name,cat.id)).join('')}</select></div>
     <div><label for="groupPreviewMode">プレビュー対象</label><select class="field" id="groupPreviewMode">${opt('demo','仮データ（16ペア・最大6ペア／組）',groupingPreview.mode)}${opt('actual','登録済みの有効ペア（DB読み取り）',groupingPreview.mode)}</select></div>
     <p class="prompt">${demo?'仮ペア16組を使用します。大会の登録データは使いません。':`登録済み有効ペア：${active.length}組 ／ 辞退・失格など除外：${inactive.length}組 ／ 設定済みの最大人数：${Number.isInteger(max)&&max>=3&&max<=6?max+'ペア':'未設定'}`}</p>
@@ -1237,7 +1303,7 @@ function render(){if(areaOf(state.tab)==='ops'&&!state.staff)state.tab='public_h
  if(pending)pending.onchange=()=>{matchListFilter.pendingOnly=pending.checked;updateMatchListResults()};
  if(clear)clear.onclick=()=>{matchListFilter.query='';if(search){search.value='';search.focus()}updateMatchListResults()};
  updateMatchListResults();
- }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const gpc=$('groupPreviewCategory');if(gpc)gpc.onchange=()=>{groupingPreview.categoryId=gpc.value;groupingPreview.groupCount='';render()};const gpm=$('groupPreviewMode');if(gpm)gpm.onchange=()=>{groupingPreview.mode=gpm.value;groupingPreview.groupCount='';render()};const gpn=$('groupPreviewCount');if(gpn)gpn.onchange=()=>{groupingPreview.groupCount=gpn.value;render()};const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
+ }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const gpc=$('groupPreviewCategory');if(gpc)gpc.onchange=()=>{groupingPreview.categoryId=gpc.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpm=$('groupPreviewMode');if(gpm)gpm.onchange=()=>{groupingPreview.mode=gpm.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpn=$('groupPreviewCount');if(gpn)gpn.onchange=()=>{groupingPreview.groupCount=gpn.value;groupingPreview.message='';render()};const gps=$('savePreliminaryGroups');if(gps)gps.onclick=savePreliminaryGroups;const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
 async function fetchAll(name,columns='*',order='id'){let out=[],from=0;for(;;){let q=client.from(name).select(columns).range(from,from+499);if(order)q=q.order(order,{ascending:true});let {data,error}=await q;if(error)throw Error(name+' : '+error.message);out.push(...(data||[]));if(!data||data.length<500)break;from+=500;if(from>=10000)throw Error(name+' : 10000行超のため取得を停止しました')}return out}
 let matchNumberLoadVersion=0;
 async function refreshMatchNumbers(){
