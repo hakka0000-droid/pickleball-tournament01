@@ -310,13 +310,55 @@ function simulateFlexibleSchedule(t,categories,courtCount,qualificationMinutes,s
  const expected=summaries.reduce((sum,x)=>sum+x.total,0),placed=schedule.length,latest=placed?Math.max(...schedule.map(x=>x.end)):begin;
  return {status:placed===expected?'fits_scenario':'not_scheduled_by_greedy',scheduled:placed,total:expected,finishMinute:latest,deadlineMinute:deadline,summaries,schedule};
 }
+// STEP 21-13: independent audit of every provisional scenario and time slot.
+// This view does not represent a saved/official schedule.
+function auditFlexibleSchedule(run,t,categories,courtCount){
+ const limit=parseWindowMinute(t.end_time?.slice(0,5))-120;
+ const duration=Number(t.match_minutes);
+ const byId=new Map(categories.map(c=>{const d=getWindowDraft(t.id,c);return [c.id,{start:parseWindowMinute(d.start),end:Math.min(parseWindowMinute(d.end),limit),max:d.max===''?courtCount:Number(d.max)}];}));
+ const byTime=new Map(),errors=[];
+ for(const match of run.schedule){
+  const w=byId.get(match.categoryId);
+  if(!w){errors.push('カテゴリー情報がありません');continue;}
+  if(!Number.isInteger(match.court)||match.court<1||match.court>courtCount)errors.push('公式コート範囲外の割当');
+  if(match.at<w.start||match.end>w.end||match.end>limit||match.end-match.at!==duration)errors.push('開催枠外または試合時間不一致');
+  if(!byTime.has(match.at))byTime.set(match.at,[]);
+  byTime.get(match.at).push(match);
+ }
+ const rows=[];
+ for(const [at,ms] of [...byTime].sort((a,b)=>a[0]-b[0])){
+  const courts=new Set(),categoryUsage=new Map();
+  for(const m of ms){
+   if(courts.has(m.court))errors.push('同じ時刻・コートの二重割当');
+   courts.add(m.court);categoryUsage.set(m.categoryId,(categoryUsage.get(m.categoryId)||0)+1);
+  }
+  if(courts.size>courtCount||ms.length>courtCount)errors.push('大会公式コート数を超過');
+  for(const [id,count] of categoryUsage)if(count>(byId.get(id)?.max??0))errors.push('カテゴリー最大面数を超過');
+  rows.push({at,used:ms.length,categoryUsage,courts:[...ms].sort((a,b)=>a.court-b.court)});
+ }
+ const unique=[...new Set(errors)];
+ return {ok:unique.length===0,errors:unique,rows,peak:Math.max(0,...rows.map(x=>x.used))};
+}
+function flexibleCourtAuditSection(t,categories,courtCount,runs){
+ const fmt=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+ const audits=runs.map(r=>auditFlexibleSchedule(r,t,categories,courtCount));
+ const allOk=audits.every(a=>a.ok),first=audits[0];
+ const rows=first.rows.map(r=>{
+  const allocations=categories.map(c=>`${esc(c.name)}：${r.categoryUsage.get(c.id)||0}面`).join(' ／ ');
+  const detail=r.courts.map(m=>`${esc(m.court)}番：${esc(m.category)}（${m.phase==='preliminary'?'予選':'決勝'}）`).join(' ／ ');
+  return `<tr><td>${fmt(r.at)}〜${fmt(r.at+Number(t.match_minutes))}</td><td>${allocations}</td><td><b>${r.used} / ${courtCount}面</b></td><td>${detail}</td></tr>`;
+ }).join('');
+ const summary=audits.map((a,i)=>`ケース${i+1}：${a.ok?'割当競合なし':'競合検出'}／ピーク${a.peak}面`).join(' ／ ');
+ const problems=audits.flatMap((a,i)=>a.errors.map(e=>`ケース${i+1}：${e}`));
+ return `<h3>時間帯別コート使用状況・競合検証</h3><div class="notice ${allOk?'blue':''}"><b>${allOk?'仮配置4ケースすべてでコート・開催枠の競合は検出されませんでした。':'仮配置に競合が検出されました。'}</b><p class="prompt">${esc(summary)}</p>${problems.length?`<p>${esc([...new Set(problems)].join(' ／ '))}</p>`:''}</div><details><summary style="cursor:pointer;font-weight:700;padding:9px 0">ケース1の時間帯別・コート別割当を表示（${first.rows.length}枠）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>時刻</th><th>カテゴリー別使用面数</th><th>合計</th><th>コート別内訳</th></tr></thead><tbody>${rows||'<tr><td colspan="4">配置された試合がありません。</td></tr>'}</tbody></table></div></details><p class="prompt">使用面数は各試合開始時刻の仮割当から集計しています。4ケースについて同時刻・同一コート、カテゴリー上限、大会のコート数、開催期限を独立に検査しています。競合なしは全試合が配置できたことを意味しません。開始時刻が試合時間単位でそろう現行の仮シミュレーションを対象とし、実試合の公開可否判定ではありません。</p>`;
+}
 function flexibleSchedulePlanningSection(t,categories,courtCount){
  const fmt=m=>Number.isFinite(m)?`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`:'—';
  let content='';try{
   const runs=Array.from({length:4},(_,i)=>simulateFlexibleSchedule(t,categories,courtCount,planningSimulation.qualificationMinutes,i));
   const pass=runs.filter(r=>r.status==='fits_scenario').length;
   const main=runs[0],rows=main.summaries.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(fmt(s.windowStart))}〜${esc(fmt(s.windowEnd))}</td><td>${s.scheduled} / ${s.total}</td><td>${s.maxUsed}面</td></tr>`).join('');
-  content=`<div class="notice ${pass===4?'blue':''}">${pass===4?'仮の勝敗4パターンで全試合を開催枠内に配置できました。':`仮の勝敗4パターン中 ${pass} パターンで全試合配置できました。未配置は不可能の証明ではありません。`}</div><div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>有効開催枠</th><th>配置済／必要</th><th>最大同時使用面数（ケース1）</th></tr></thead><tbody>${rows}</tbody></table></div><p class="prompt">ケース別：${runs.map((r,i)=>`ケース${i+1} ${r.scheduled}/${r.total}試合・${fmt(r.finishMinute)}終了`).join(' ／ ')}</p>`;
+  content=`<div class="notice ${pass===4?'blue':''}">${pass===4?'仮の勝敗4パターンで全試合を開催枠内に配置できました。':`仮の勝敗4パターン中 ${pass} パターンで全試合配置できました。未配置は不可能の証明ではありません。`}</div><div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>有効開催枠</th><th>配置済／必要</th><th>最大同時使用面数（ケース1）</th></tr></thead><tbody>${rows}</tbody></table></div><p class="prompt">ケース別：${runs.map((r,i)=>`ケース${i+1} ${r.scheduled}/${r.total}試合・${fmt(r.finishMinute)}終了`).join(' ／ ')}</p>${flexibleCourtAuditSection(t,categories,courtCount,runs)}`;
  }catch(e){content=`<div class="notice">カテゴリー開催枠または募集計画を確認してください：${esc(e.message)}</div>`;}
  return `<h2>カテゴリー別・共有コート可変割当の仮検証</h2><div class="card stack"><div><label for="qualificationMinutes">カテゴリーごとの予選終了〜決勝開始までの確認時間</label><select class="field" id="qualificationMinutes">${[0,10,15,20,30,45,60].map(n=>opt(String(n),`${n}分`,String(planningSimulation.qualificationMinutes))).join('')}</select></div>${content}<p class="prompt">開催枠は画面の入力値を使います（未保存も含む）。カテゴリーごとに予選→確認→決勝を進め、公式戦用コートを時間帯単位で可変配分します。大会終了前120分は運営用に確保する仮定です。貪欲法の簡易探索・仮勝敗のため実施可能性の保証ではありません。個別選手の重複申込、実試合の結果確定、進行遅延は未反映です。DBの対戦表・時間割は変更しません。</p></div>`;
 }
