@@ -964,6 +964,137 @@ function realSchedulePreview(t){
   rows.sort((a,b)=>a.start-b.start||a.court.name.localeCompare(b.court.name,'ja',{numeric:true}));
   return {rows,pending,begin,deadline,courts,duration,total:all.length};
 }
+
+// STEP 22-6-9-139: whole-tournament fair rescheduling of draft, unplayed games.
+// Preview never writes to DB. The original initial-save planner remains unchanged.
+function reorganizationPreview(t){
+  if(!t)throw Error('大会が選択されていません。');
+  if(state.courtLoadError||state.error||state.loading)throw Error('試合・コート情報を取得できません。更新してください。');
+  const catIds=new Set(state.categories.filter(c=>c.tournament_id===t.id).map(c=>c.id));
+  const all=state.matches.filter(m=>catIds.has(m.category_id));
+  if(!all.length)throw Error('この大会に対戦表がありません。先に「6. 対戦表」を作成してください。');
+  if(all.some(m=>stageFor(m)?.stage_type!=='preliminary'||m.status!=='scheduled'||!m.pair_a_id||!m.pair_b_id||m.score_a!=null||m.score_b!=null))throw Error('未対応の決勝試合、結果、試合状態が含まれます。既存データを保護するため仮配置を停止しました。');
+  const begin0=parseWindowMinute(String(t.start_time||'').slice(0,5)),end0=parseWindowMinute(String(t.end_time||'').slice(0,5));
+  const begin=begin0+EVENT_PREP_MINUTES,deadline=end0-EVENT_CLOSE_MINUTES;
+  const duration=Number(t.match_minutes),rest=Number(t.minimum_rest_minutes),limit=Number(t.max_consecutive_matches);
+  if(begin0===null||end0===null||!Number.isInteger(duration)||duration<1||!Number.isInteger(rest)||rest<0||!Number.isInteger(limit)||limit<1||begin+duration>deadline)throw Error('大会時間・休憩・連戦の設定が不正です。');
+  const courts=state.courts.filter(c=>c.tournament_id===t.id&&c.court_type==='official'&&c.is_active).sort((a,b)=>a.name.localeCompare(b.name,'ja',{numeric:true})||a.id.localeCompare(b.id));
+  if(!courts.length)throw Error('使用できる公式コートがありません。');
+  const pairById=new Map(state.pairs.map(p=>[p.id,p]));
+  // Use names as a conservative cross-category double-entry guard.
+  const people=m=>[m.pair_a_id,m.pair_b_id].flatMap(id=>{const p=pairById.get(id);if(!p||p.category_id!==m.category_id||p.participation_status!=='active')throw Error('試合に紐づく有効ペアが確認できません。');return [p.player1,p.player2].map(v=>String(v||'').replace(/[\s\u3000]+/g,'').toLocaleLowerCase());});
+  const tasks=all.map(m=>({m,persons:people(m)}));
+  if(tasks.some(x=>x.persons.some(v=>!v)||new Set(x.persons).size!==4))throw Error('同一選手の重複・選手名の欠落があります。');
+  const categoryMap=new Map(state.categories.map(c=>[c.id,c]));
+  const windowMap=new Map();
+  for(const id of catIds){const c=categoryMap.get(id);if(!all.some(m=>m.category_id===id))continue;
+    const start=c.schedule_start_time?parseWindowMinute(String(c.schedule_start_time).slice(0,5)):begin;
+    const end=c.schedule_end_time?parseWindowMinute(String(c.schedule_end_time).slice(0,5)):deadline;
+    if(start===null||end===null)throw Error('カテゴリー開催枠が不正です。');
+    windowMap.set(id,{start:Math.max(begin,start),end:Math.min(deadline,end),max:c.max_courts==null?courts.length:Number(c.max_courts),preferred:c.preferred_courts==null?courts.length:Number(c.preferred_courts)});
+  }
+  const pending=tasks.slice().sort((a,b)=>a.m.id.localeCompare(b.m.id));
+   const categoryTotal=new Map();for(const x of tasks)categoryTotal.set(x.m.category_id,(categoryTotal.get(x.m.category_id)||0)+1);
+   const categoryPlaced=new Map();
+  const lastEnd=new Map(),lastSlot=new Map(),streak=new Map(),rows=[];
+  for(let at=begin;pending.length&&at+duration<=deadline;at+=duration){
+    const occupied=new Set(),usedCat=new Map(),usedCourts=new Set();
+     // Fairness first: compare category completion ratios, not whether a game was previously assigned.
+     // Within equal progress, tighter windows and long-waiting players come first.
+    for(const court of courts){
+    pending.sort((a,b)=>{
+       const ca=a.m.category_id,cb=b.m.category_id;
+       const ratio=(categoryPlaced.get(ca)||0)/categoryTotal.get(ca)-(categoryPlaced.get(cb)||0)/categoryTotal.get(cb);
+       if(Math.abs(ratio)>1e-9)return ratio;
+       const wa=windowMap.get(ca),wb=windowMap.get(cb);
+       const slack=(wa.end-at)-(wb.end-at);if(slack)return slack;
+       const waiting=Math.min(...a.persons.map(x=>lastEnd.get(x)??-99999))-Math.min(...b.persons.map(x=>lastEnd.get(x)??-99999));
+       return waiting||a.m.id.localeCompare(b.m.id);
+     });
+
+      const index=pending.findIndex(task=>{
+        const w=windowMap.get(task.m.category_id),catUsed=usedCat.get(task.m.category_id)||0;
+        return at>=w.start&&at+duration<=w.end&&catUsed<w.max&&task.persons.every(person=>!occupied.has(person)&&(lastEnd.get(person)==null||at-lastEnd.get(person)>=rest)&&(lastSlot.get(person)!==at-duration||(streak.get(person)||0)<limit));
+      });
+      if(index<0)break;
+      const task=pending.splice(index,1)[0];
+      for(const person of task.persons){const consecutive=lastSlot.get(person)===at-duration;streak.set(person,consecutive?(streak.get(person)||0)+1:1);lastSlot.set(person,at);lastEnd.set(person,at+duration);occupied.add(person);}
+      usedCourts.add(court.id);usedCat.set(task.m.category_id,(usedCat.get(task.m.category_id)||0)+1);
+       categoryPlaced.set(task.m.category_id,(categoryPlaced.get(task.m.category_id)||0)+1);
+      rows.push({match:task.m,court,start:at,end:at+duration,persons:task.persons});
+    }
+  }
+  // Independently re-check every placed match, and all participant timelines.
+  const errors=[],times=new Map(),byPerson=new Map();
+  for(const r of rows){const w=windowMap.get(r.match.category_id),key=r.start+'|'+r.court.id;
+    if(times.has(key))errors.push('コート重複');times.set(key,true);
+    if(r.start<w.start||r.end>w.end||r.end>deadline||r.start<begin||r.end-r.start!==duration)errors.push('時間枠違反');
+    for(const person of r.persons){if(!byPerson.has(person))byPerson.set(person,[]);byPerson.get(person).push(r);}
+  }
+  for(const rr of byPerson.values()){
+    rr.sort((a,b)=>a.start-b.start);let run=0,previous=null;
+    for(const r of rr){if(previous&&r.start<previous.end+rest)errors.push('選手の休憩・同時刻違反');run=previous&&r.start===previous.start+duration?run+1:1;if(run>limit)errors.push('連戦上限違反');previous=r;}
+  }
+  if(errors.length)throw Error('内部検証に失敗：'+[...new Set(errors)].join('、'));
+  rows.sort((a,b)=>a.start-b.start||a.court.name.localeCompare(b.court.name,'ja',{numeric:true}));
+  return {rows,pending,begin,deadline,courts,duration,total:all.length};
+}
+const reorganizeState={busy:false,message:'',ok:false};
+function jstSnapshotTime(value){
+ if(value==null)return null;
+ const date=new Date(value);if(!Number.isFinite(date.getTime()))throw Error('既存の開始時刻が不正です。');
+ const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+ return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}+09:00`;
+}
+function scheduleCurrentSnapshot(matches){
+ return matches.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(m=>({match_id:m.id,court_id:m.court_id??null,start_time:jstSnapshotTime(m.start_time)}));
+}
+function reorganizationSection(t,all){
+ let plan;try{plan=reorganizationPreview(t);}catch(e){return `<div class="empty-error">再編成プレビューを作成できません：${esc(e.message)}</div>`;}
+ const complete=!plan.pending.length&&plan.rows.length===plan.total;
+ const allowed=complete&&!!client&&t.status==='draft'&&state.staff&&state.tournamentAdminLoaded&&!state.tournamentAdminError&&state.tournamentAdminIds.includes(t.id)&&!state.loading&&!state.error&&!state.courtLoadError&&!reorganizeState.busy;
+ const current=new Map(all.map(m=>[m.id,m]));
+ const changes=plan.rows.map(r=>{const old=current.get(r.match.id);const next=scheduleAssignments(t,{rows:[r]})[0];return {r,old,next,changed:!old?.start_time||!old?.court_id||old.court_id!==next.court_id||new Date(old.start_time).getTime()!==new Date(next.start_time).getTime()};});
+ const moved=changes.filter(x=>x.changed&&x.old?.start_time&&x.old?.court_id).length,newly=changes.filter(x=>x.changed&&(!x.old?.start_time||!x.old?.court_id)).length;
+ const fmt=val=>val?new Date(val).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'}):'未割当';
+ const byCat=state.categories.filter(c=>c.tournament_id===t.id&&all.some(m=>m.category_id===c.id)).map(c=>{const rs=plan.rows.filter(r=>r.match.category_id===c.id);return `<tr><td>${esc(c.name)}</td><td>${rs.length}/${all.filter(m=>m.category_id===c.id).length}</td><td>${rs.length?minuteClock(Math.min(...rs.map(r=>r.start))):'—'}</td><td>${rs.length?minuteClock(Math.max(...rs.map(r=>r.end))):'—'}</td></tr>`;}).join('');
+ const detail=changes.filter(x=>x.changed).map(x=>`<tr><td>${esc(matchCode(x.r.match)||x.r.match.id.slice(0,8))}</td><td>${esc(catName(x.r.match.category_id))}・${esc(x.r.match.group_name||'—')}組</td><td>${esc(fmt(x.old?.start_time))} / ${esc(courtName(x.old?.court_id))}</td><td>${minuteClock(x.r.start)} / ${esc(x.r.court.name)}</td></tr>`).join('');
+ return `<h3>大会全試合の公平な再編成</h3><div class="notice blue">既存試合も追加試合も同じ優先順位で再配置します。カテゴリーの配置進行率を優先し、既存の割当を守ることは優先しません。保存まではDBを変更しません。</div><div class="metrics"><div class="metric"><small>仮配置</small><strong>${plan.rows.length}/${plan.total}</strong></div><div class="metric"><small>既存試合の移動</small><strong>${moved}</strong></div><div class="metric"><small>未割当の新規配置</small><strong>${newly}</strong></div></div><div class="notice ${complete?'blue':''}">${complete?'全試合を仮配置し、コート・選手の競合検査を通過しました。':'未配置の試合があるため、保存できません。'} ${plan.pending.length}試合未配置。</div><h3>カテゴリーごとの進行予定</h3><div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>配置</th><th>開始</th><th>終了</th></tr></thead><tbody>${byCat}</tbody></table></div><details><summary style="cursor:pointer;font-weight:700;padding:10px 0">変更前後を表示（${changes.filter(x=>x.changed).length}試合）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>試合番号</th><th>カテゴリー・組</th><th>変更前 時刻 / コート</th><th>変更後 時刻 / コート</th></tr></thead><tbody>${detail||'<tr><td colspan="4">変更はありません</td></tr>'}</tbody></table></div></details><button type="button" class="btn wide" id="saveReorganizedSchedule" ${allowed?'':'disabled'}>${reorganizeState.busy?'再編成を保存・照合中…':'変更内容を確認して全試合を再編成保存'}</button>${!allowed?'<p class="prompt">全試合の仮配置、下書き状態、大会管理者権限が必要です。</p>':''}${reorganizeState.message?`<p class="${reorganizeState.ok?'notice blue':'empty-error'}" role="status">${esc(reorganizeState.message)}</p>`:''}<p class="prompt">カテゴリー間の均等化を優先する決定的な簡易探索です。最適解の保証はありません。保存時にサーバー側で全試合の時間割を検証します。</p>`;
+}
+async function saveReorganizedSchedule(){
+ if(reorganizeState.busy)return;
+ const tid=categoryForm.tournamentId,t=state.tournaments.find(x=>x.id===tid);
+ let plan;try{plan=reorganizationPreview(t);}catch(e){reorganizeState.ok=false;reorganizeState.message=e.message;render();return;}
+ if(!client||t?.status!=='draft'||!state.staff||!state.tournamentAdminIds.includes(tid)||plan.pending.length||plan.rows.length!==plan.total)return;
+ const before=scheduleFingerprint(tid),assignments=scheduleAssignments(t,plan),expected=new Map(assignments.map(a=>[a.match_id,a]));
+ if(expected.size!==plan.total)return;
+ const current=tournamentMatches(tid),changed=assignments.filter(a=>{const m=current.find(x=>x.id===a.match_id);return m?.court_id!==a.court_id||!m?.start_time||new Date(m.start_time).getTime()!==new Date(a.start_time).getTime()}).length;
+ if(!confirm(`大会「${t.name}」の全${plan.total}試合を再編成して保存しますか？\n時刻・コートが変更される試合：${changed}件\n\n既存の試合も移動します。保存前に表示内容を確認してください。`))return;
+ reorganizeState.busy=true;reorganizeState.message='';reorganizeState.ok=false;render();let attempted=false;
+ try{
+  await loadData();
+  if(state.error||state.courtLoadError||categoryForm.tournamentId!==tid||scheduleFingerprint(tid)!==before)throw Error('再編成の確認後に大会データが変更されました。更新してやり直してください。');
+  const freshT=state.tournaments.find(x=>x.id===tid),freshPlan=reorganizationPreview(freshT),fresh=scheduleAssignments(freshT,freshPlan);
+  if(freshT.status!=='draft'||!state.staff||!state.tournamentAdminIds.includes(tid)||freshPlan.pending.length||fresh.length!==expected.size||fresh.some(a=>!expected.has(a.match_id)||a.court_id!==expected.get(a.match_id).court_id||a.start_time!==expected.get(a.match_id).start_time))throw Error('保存直前の再配置または権限の確認に失敗しました。');
+  // Load authoritative current schedule, including the snapshot required by the RPC.
+  const categoryIds=state.categories.filter(c=>c.tournament_id===tid).map(c=>c.id);
+  const {data:dbBefore,error:readError}=await client.from('matches').select('id,category_id,start_time,court_id').in('category_id',categoryIds).order('id');
+  if(readError||!dbBefore||dbBefore.length!==expected.size)throw Error('保存直前の時間割をDBから読み取れませんでした。');
+  const cached=new Map(tournamentMatches(tid).map(m=>[m.id,m]));
+  if(dbBefore.some(m=>!cached.has(m.id)||m.court_id!==cached.get(m.id).court_id||((m.start_time==null)!=(cached.get(m.id).start_time==null))||(m.start_time!=null&&new Date(m.start_time).getTime()!==new Date(cached.get(m.id).start_time).getTime())))throw Error('保存直前にDBの時間割が変更されました。');
+  const snapshot=scheduleCurrentSnapshot(dbBefore);
+  attempted=true;
+  const {data:saved,error:rpcError}=await client.rpc('admin_reorganize_match_schedule',{p_tournament_id:tid,p_assignments:assignments,p_expected_current:snapshot});
+  if(rpcError)throw Error(rpcError.message);
+  if(Number(saved)!==expected.size)throw Error('RPCの更新件数が一致しません。');
+  const {data:dbAfter,error:verifyError}=await client.from('matches').select('id,category_id,start_time,court_id').in('category_id',categoryIds);
+  if(verifyError||!dbAfter||dbAfter.length!==expected.size||dbAfter.some(m=>!expected.has(m.id)||m.court_id!==expected.get(m.id).court_id||new Date(m.start_time).getTime()!==new Date(expected.get(m.id).start_time).getTime()))throw Error('保存後のDB照合に失敗しました。');
+  await loadData();if(state.error||state.courtLoadError||tournamentMatches(tid).length!==expected.size)throw Error('保存後の画面再取得に失敗しました。');
+  reorganizeState.ok=true;reorganizeState.message=`全${expected.size}試合の再編成を保存し、DBの日時・コートを照合しました。`;
+ }catch(e){reorganizeState.ok=false;reorganizeState.message='再編成結果を確認できませんでした：'+e.message+(attempted?'。更新された可能性があるため再送信せず「更新」で確認してください。':'。保存RPCは呼び出していません。');}
+ finally{reorganizeState.busy=false;render();}
+}
+
 // STEP 22-6-9-105: saved schedule display, explicit admin-only one-shot save.
 const realScheduleSave={busy:false,message:'',ok:false};
 function tournamentMatches(tid){
@@ -998,7 +1129,7 @@ function realScheduleSection(t){
  if(!t)return '<div class="notice">対象大会を選択してください。</div>';
  let body='';
  const all=tournamentMatches(t.id);
- if(all.length&&all.some(m=>m.start_time!=null||m.court_id!=null))body=savedRealScheduleSection(t,all);
+ if(all.length&&all.some(m=>m.start_time!=null||m.court_id!=null))body=savedRealScheduleSection(t,all)+(t.status==='draft'?reorganizationSection(t,all):'');
  else try{
   const plan=realSchedulePreview(t),{rows,pending,begin,deadline,total,courts,duration}=plan;
   const complete=!pending.length,canSave=scheduleSaveEligible(t,plan);
@@ -1689,7 +1820,7 @@ function render(){if(areaOf(state.tab)==='ops'&&!state.staff)state.tab='public_h
  if(pending)pending.onchange=()=>{matchListFilter.pendingOnly=pending.checked;updateMatchListResults()};
  if(clear)clear.onclick=()=>{matchListFilter.query='';if(search){search.value='';search.focus()}updateMatchListResults()};
  updateMatchListResults();
- }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const gpc=$('groupPreviewCategory');if(gpc)gpc.onchange=()=>{groupingPreview.categoryId=gpc.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpm=$('groupPreviewMode');if(gpm)gpm.onchange=()=>{groupingPreview.mode=gpm.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpn=$('groupPreviewCount');if(gpn)gpn.onchange=()=>{groupingPreview.groupCount=gpn.value;groupingPreview.message='';render()};const gps=$('savePreliminaryGroups');if(gps)gps.onclick=savePreliminaryGroups;const dc=$('drawCategory');if(dc)dc.onchange=()=>{drawPreview.categoryId=dc.value;drawPreview.message='';render()};const dg=$('generatePreliminaryMatches');if(dg)dg.onclick=generatePreliminaryMatches;const ss=$('saveRealSchedule');if(ss)ss.onclick=saveRealSchedule;const pubCheck=$('runPublishCheck');if(pubCheck)pubCheck.onclick=checkTournamentPublish;const pubSave=$('confirmPublishTournament');if(pubSave)pubSave.onclick=publishTournament;const printBtn=$('printTournamentSchedule');if(printBtn)printBtn.onclick=printTournament;const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;clearPublishState();categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
+ }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const gpc=$('groupPreviewCategory');if(gpc)gpc.onchange=()=>{groupingPreview.categoryId=gpc.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpm=$('groupPreviewMode');if(gpm)gpm.onchange=()=>{groupingPreview.mode=gpm.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpn=$('groupPreviewCount');if(gpn)gpn.onchange=()=>{groupingPreview.groupCount=gpn.value;groupingPreview.message='';render()};const gps=$('savePreliminaryGroups');if(gps)gps.onclick=savePreliminaryGroups;const dc=$('drawCategory');if(dc)dc.onchange=()=>{drawPreview.categoryId=dc.value;drawPreview.message='';render()};const dg=$('generatePreliminaryMatches');if(dg)dg.onclick=generatePreliminaryMatches;const ss=$('saveRealSchedule');if(ss)ss.onclick=saveRealSchedule;const rs=$('saveReorganizedSchedule');if(rs)rs.onclick=saveReorganizedSchedule;const pubCheck=$('runPublishCheck');if(pubCheck)pubCheck.onclick=checkTournamentPublish;const pubSave=$('confirmPublishTournament');if(pubSave)pubSave.onclick=publishTournament;const printBtn=$('printTournamentSchedule');if(printBtn)printBtn.onclick=printTournament;const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;clearPublishState();categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
 async function fetchAll(name,columns='*',order='id'){let out=[],from=0;for(;;){let q=client.from(name).select(columns).range(from,from+499);if(order)q=q.order(order,{ascending:true});let {data,error}=await q;if(error)throw Error(name+' : '+error.message);out.push(...(data||[]));if(!data||data.length<500)break;from+=500;if(from>=10000)throw Error(name+' : 10000行超のため取得を停止しました')}return out}
 let matchNumberLoadVersion=0;
 async function refreshMatchNumbers(){
