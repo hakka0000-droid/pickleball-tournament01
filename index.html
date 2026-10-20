@@ -727,6 +727,22 @@ async function savePreliminaryGroups(){
     groupingPreview.message='保存結果を確認できませんでした：'+e.message+'。自動再送信はしません。「更新」でDBの組分け状況を確認してください。';
   }finally{groupingPreview.busy=false;render();}
 }
+// STEP 22-6-9-37: read-only diagnostics for the preliminary-group save gate.
+// These indicators expose only existing in-memory status; no RPC and no writes.
+function groupSaveDiagnosticSection(t,cat){
+  const statuses=[
+    ['スタッフ認証',!!state.staff,state.staffError],
+    ['大会管理者権限',!!state.auth&&state.tournamentAdminLoaded&&!state.tournamentAdminError&&state.tournamentAdminIds.includes(t.id),state.tournamentAdminError||(!state.tournamentAdminLoaded?'権限の取得が完了していません':!state.tournamentAdminIds.includes(t.id)?'この大会の管理者として確認できません':'')],
+    ['順位承認情報',state.approvedLoaded&&!state.approvedError,state.approvedError||(!state.approvedLoaded?'読み込み未完了':'')],
+    ['決勝進出者の確定情報',state.qualificationLocksLoaded&&!state.qualificationLocksError,state.qualificationLocksError||(!state.qualificationLocksLoaded?'読み込み未完了':'')],
+    ['正式結果情報',state.officialLoaded&&!state.officialError,state.officialError||(!state.officialLoaded?'読み込み未完了':'')],
+    ['対戦表情報',!state.bracketError,state.bracketError],
+    ['画面データ読み込み',!state.loading&&!state.error,state.error|| (state.loading?'読み込み中':'')]
+  ];
+  const rows=statuses.map(([label,ok,detail])=>`<tr><td>${esc(label)}</td><td><b>${ok?'OK':'要確認'}</b></td><td style="white-space:normal;overflow-wrap:anywhere">${esc(ok?'—':detail||'状態が確認できません')}</td></tr>`).join('');
+  return `<details class="card" id="groupSaveDiagnostics"><summary><b>保存前チェックの診断結果（読み取り専用）</b></summary><p class="prompt">原因確認用です。権限制御・保存条件は変更しません。ログイン情報や個人情報は表示しません。</p><div class="tablebox"><table class="tbl"><thead><tr><th>確認項目</th><th>状態</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+}
+
 function groupingPreviewSection(t,categories){
   if(!t)return '<div class="notice">対象大会を選択してください。</div>';
   if(!categories.length)return '<div class="notice">先にカテゴリーを追加してください。仮データで確認する場合も、対象カテゴリーを1件登録してください。</div>';
@@ -755,6 +771,7 @@ function groupingPreviewSection(t,categories){
     ${selected?`<p><b>${participants.length}ペア → ${selected.count}組</b>（${selected.sizes.join('・')}ペア／組）</p><div class="grid">${grid}</div>`:`<div class="notice">${demo?'人数構成を計算できません。':'現在の有効ペア数と最大組人数では組分け候補がありません。3ペア以上を登録するか、カテゴリーの募集枠設定を確認してください。'}</div>`}
     <button type="button" class="btn wide" id="savePreliminaryGroups" ${canSaveGroups?'':'disabled'}>${groupingPreview.busy?'確定処理中…':'予選組分けを確定して保存'}</button>
     ${!canSaveGroups?`<p class="prompt" role="status">保存できない理由：${esc(saveBlockReason)}</p>`:''}
+    ${!demo&&!canSaveGroups?groupSaveDiagnosticSection(t,cat):''}
     ${groupingPreview.message?`<div class="${groupingPreview.success?'notice blue':'empty-error'}" role="status">${esc(groupingPreview.message)}</div>`:''}
     <p class="prompt">プレビューは再現性のある名前順の仮配置です。実際の抽選・シード・対戦重複回避は未実装です。保存操作を実行するまでは既存のgroup_nameは変更しません。</p></div>`;
 }
