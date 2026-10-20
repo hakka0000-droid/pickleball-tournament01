@@ -678,7 +678,9 @@ function groupSaveEligible(t,cat,active,selected){
   if(!client||!t||!cat||!selected||groupingPreview.mode!=='actual'||groupingPreview.busy||state.loading||state.error)return false;
   if(t.status!=='draft'||!canManageCategories()||!state.tournamentAdminIds.includes(t.id))return false;
   if(!state.approvedLoaded||state.approvedError||!state.qualificationLocksLoaded||state.qualificationLocksError||!state.officialLoaded||state.officialError||state.bracketError)return false;
-  if(state.matches.some(m=>m.category_id===cat.id)||state.approved.some(a=>a.category_id===cat.id)||state.qualificationLocks.includes(cat.id)||state.officialResults.some(r=>r.category_id===cat.id)||state.bracketSlots.some(s=>state.stages.some(st=>st.id===s.stage_id&&st.category_id===cat.id)))return false;
+  // The public result RPC includes synthetic 'unconfirmed' rows for categories without stored results.
+  // Keep all other/unknown statuses fail-closed; the save RPC also verifies DB state.
+  if(state.matches.some(m=>m.category_id===cat.id)||state.approved.some(a=>a.category_id===cat.id)||state.qualificationLocks.includes(cat.id)||state.officialResults.some(r=>r.category_id===cat.id&&r.status!=='unconfirmed')||state.bracketSlots.some(s=>state.stages.some(st=>st.id===s.stage_id&&st.category_id===cat.id)))return false;
   if(state.pairs.some(p=>p.category_id===cat.id&&p.group_name!==null&&p.group_name!==undefined))return false;
   return active.length===selected.sizes.reduce((a,b)=>a+b,0);
 }
@@ -754,7 +756,7 @@ function groupSaveDiagnosticSection(t,cat,active,selected){
     ['既存の試合がない',existingMatches===0,`既存試合 ${existingMatches}件`],
     ['承認済み順位がない',approved===0,`承認済み順位 ${approved}件`],
     ['決勝進出者の確定がない',!locked,'進出者確定フラグがあります'],
-    ['正式結果の記録がない',official.length===0,`正式結果の記録 ${official.length}件（状態に関係なく保存不可）`],
+    ['確定・取消等の正式結果がない',official.every(r=>r.status==='unconfirmed'),`未確定以外の状態 ${official.filter(r=>r.status!=='unconfirmed').length}件（未確定は保存判定の妨げにしない）`],
     ['決勝対戦枠がない',bracket.length===0,`決勝対戦枠 ${bracket.length}件`],
     ['既存の組分けがない',savedAssignments===0,`組分け登録済み ${savedAssignments}ペア`]
   ];
@@ -769,7 +771,7 @@ function groupSaveDiagnosticSection(t,cat,active,selected){
   const idCrosscheck=`<h3 style="margin-top:16px">カテゴリーIDの照合（読み取り専用）</h3>
     <p class="prompt">画面の対象大会ID：<code>${esc(t.id)}</code></p>
     <p class="prompt">画面の対象カテゴリーID：<code>${esc(cat.id)}</code></p>
-    <p class="prompt">正式結果の全取得件数：${state.officialResults.length}件／対象カテゴリーに完全一致：${official.length}件</p>
+    <p class="prompt">正式結果RPCの全取得件数：${state.officialResults.length}件／対象カテゴリーに一致：${official.length}件（未確定の表示用行を含む）</p>
     <div class="tablebox"><table class="tbl"><thead><tr><th>行</th><th>正式結果のカテゴリーID</th><th>対象IDとの比較</th><th>状態</th></tr></thead><tbody>${officialRows||'<tr><td colspan="4">取得結果なし</td></tr>'}</tbody></table></div>
     <p class="prompt">診断専用表示です。サーバーへの通信・保存処理・権限制御は変更していません。</p>`;
   const rows=statuses.map(([label,ok,detail])=>`<tr><td>${esc(label)}</td><td><b>${ok?'OK':'要確認'}</b></td><td style="white-space:normal;overflow-wrap:anywhere">${esc(ok?'—':detail||'状態を確認してください')}</td></tr>`).join('');
