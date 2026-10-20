@@ -623,7 +623,7 @@ function prepPlaceholder(title,detail){return `<div class="card"><h3>${esc(title
 function manage(){
  if(!canOpenManage())return '<div class="notice">大会管理権限を確認できません。再ログインまたは更新してください。</div>';
  const sysAdmin=state.systemAdminLoaded&&state.systemAdmin&&!state.systemAdminError;
- const tournamentSection=sysAdmin?`<h2>大会情報を新規登録</h2><div class="notice blue">大会の新規作成はシステム管理者専用です。作成者は自動的に大会管理者になります。</div><form class="card stack" id="createTournamentForm"><div><label for="newTournamentName">大会名（必須）</label><input class="field" id="newTournamentName" maxlength="200" required placeholder="例：ピックルボール交流大会"></div><div><label for="newTournamentDate">開催日（任意）</label><input class="field" id="newTournamentDate" type="date"></div><div class="grid"><div><label for="newMatchMinutes">1試合の時間（分）</label><input class="field" id="newMatchMinutes" type="number" min="1" max="180" step="1" value="15" required></div><div><label for="newRestMinutes">最低休憩時間（分）</label><input class="field" id="newRestMinutes" type="number" min="0" max="180" step="1" value="0" required></div><div><label for="newConsecutive">最大連続試合数</label><input class="field" id="newConsecutive" type="number" min="1" max="10" step="1" value="2" required></div></div><p class="prompt">作成時の大会ステータスは draft（下書き）です。既存大会は変更しません。</p><p id="createTournamentMsg" class="empty-error hide" role="alert"></p><button id="createTournamentSubmit" type="submit" class="btn wide">大会を作成する</button></form>`:'';
+ const tournamentSection=sysAdmin?newTournamentCreationSection():'';
  const allowed=state.tournaments.filter(t=>state.tournamentAdminIds.includes(t.id));
  if(!allowed.some(t=>t.id===categoryForm.tournamentId))categoryForm.tournamentId=allowed[0]?.id||'';
  const t=allowed.find(x=>x.id===categoryForm.tournamentId);
@@ -724,29 +724,86 @@ async function createCategory(e){
  finally{if(button.isConnected)button.disabled=false;}
 }
 
+// STEP 22-3-6: Draft values remain local until the single atomic RPC succeeds.
+const newTournamentDraft={name:'',date:'',start:'09:00',end:'17:00',minutes:'15',rest:'0',consecutive:'2',courts:'4',categories:[]};
+let newTournamentBusy=false;
+function newCategoryDraft(){return {levels:[1],division:'フリー',order:String(newTournamentDraft.categories.length+1),pairs:'',group:'4',advance:'2',final:'knockout',start:'',end:'',preferred:'',max:''};}
+function categoryDraftName(c){return c.levels.map(n=>CATEGORY_LEVELS[n]).join('・')+'／'+c.division;}
+function newTournamentCreationSection(){
+ const d=newTournamentDraft;
+ const field=(label,key,type='text',extra='')=>`<div><label for="nt-${key}">${label}</label><input class="field" id="nt-${key}" data-nt-field="${key}" type="${type}" value="${esc(d[key])}" ${extra}></div>`;
+ const categoryCards=d.categories.map((c,i)=>{
+  const title=categoryDraftName(c);
+  const levels=CATEGORY_LEVELS.map((lv,j)=>`<label class="category-level"><input type="checkbox" data-nt-level="${i}" value="${j}" ${c.levels.includes(j)?'checked':''}><span>${esc(lv)}</span></label>`).join('');
+  const cf=(label,key,type='number',extra='')=>`<div><label>${label}</label><input class="field" data-nt-cat="${i}" data-nt-key="${key}" type="${type}" value="${esc(c[key])}" ${extra}></div>`;
+  const cs=(label,key,values)=>`<div><label>${label}</label><select class="field" data-nt-cat="${i}" data-nt-key="${key}">${values.map(v=>opt(String(v[0]),v[1],String(c[key]))).join('')}</select></div>`;
+  return `<div class="card stack"><div class="row"><h3 style="margin:0">カテゴリー${i+1}：${esc(title)}</h3><button type="button" class="btn secondary mini-btn" data-nt-remove="${i}">削除</button></div><div><label>級別（連続する範囲を選択）</label><div class="category-levels">${levels}</div></div><div class="grid">${cs('参加区分','division',CATEGORY_DIVISIONS.map(x=>[x,x]))}${cf('表示順（0〜1000）','order','number','min="0" max="1000" step="1"')}</div><h3>募集枠（任意）</h3><div class="grid">${cf('募集予定ペア数（3〜64、未定なら空欄）','pairs','number','min="3" max="64" step="1" placeholder="未設定"')}${cs('1組の最大ペア数','group',[3,4,5,6].map(x=>[x,x+'ペア']))}${cs('各組の決勝進出','advance',[[1,'上位1ペア'],[2,'上位2ペア']])}${cs('決勝形式','final',[['knockout','トーナメント'],['round_robin','総当たり']])}</div><p class="prompt">募集予定ペア数が空欄なら、予選・決勝条件もDBへは保存しません。</p><h3>開催枠（任意）</h3><div class="grid">${cf('カテゴリー開始','start','time')}${cf('カテゴリー終了','end','time')}${cf('希望コート面数','preferred','number','min="1" max="100" placeholder="未設定"')}${cf('最大同時コート面数','max','number','min="1" max="100" placeholder="未設定"')}</div><p class="prompt">設定する場合は4項目すべて入力してください。開催終了は大会終了120分前までです。</p></div>`;
+ }).join('');
+ return `<h2>大会情報を新規登録</h2><div class="notice blue">システム管理者専用です。大会・公式コート・カテゴリー・募集枠・開催枠を一括作成します。途中でエラーが出た場合は全体をロールバックします。</div><form class="stack" id="createTournamentForm"><div class="card stack"><h3>1. 大会基本情報</h3>${field('大会名（必須）','name','text','maxlength="200" required placeholder="例：秋季ピックルボール大会"')}${field('開催日（必須）','date','date','required')}<div class="grid">${field('大会開始時刻（必須）','start','time','required')}${field('大会終了時刻（必須）','end','time','required')}${field('1試合の時間（分）','minutes','number','min="1" max="180" required')}${field('最低休憩時間（分）','rest','number','min="0" max="180" required')}${field('最大連続試合数','consecutive','number','min="1" max="10" required')}${field('公式コート数（0〜100）','courts','number','min="0" max="100" required')}</div><p class="prompt">大会の終了前120分は設営・受付・表彰・撤収の運営用として確保する仮定です。コート0面でも下書きを作成できますが、開催枠のあるカテゴリーは登録できません。</p></div><div class="row"><h2>2. カテゴリーと募集枠（任意）</h2><button type="button" class="btn secondary mini-btn" id="ntAddCategory">＋ 追加</button></div>${categoryCards||'<div class="card"><p class="prompt">カテゴリーはまだ追加されていません。基本情報だけで大会を作成することもできます。</p></div>'}<div class="card stack"><p class="prompt">作成ステータスは下書き（draft）です。作成後に各設定を変更できます。実ペア・対戦表・正式な時間割は生成しません。</p><p id="createTournamentMsg" class="empty-error hide" role="alert"></p><button id="createTournamentSubmit" type="submit" class="btn wide" ${newTournamentBusy?'disabled':''}>${newTournamentBusy?'作成中…':'内容を確認して大会を作成'}</button></div></form>`;
+}
+function intField(raw,min,max,label){if(!/^\d+$/.test(String(raw)))throw Error(label+'は整数で入力してください。');const n=Number(raw);if(!Number.isSafeInteger(n)||n<min||n>max)throw Error(label+'は'+min+'〜'+max+'の整数で指定してください。');return n;}
+function validateNewTournament(){
+ const d=newTournamentDraft;
+ if(!d.name.trim()||d.name.trim().length>200)throw Error('大会名を1〜200文字で入力してください。');
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(d.date)||Number.isNaN(Date.parse(d.date+'T00:00:00')))throw Error('開催日を入力してください。');
+ const s=parseWindowMinute(d.start),e=parseWindowMinute(d.end);
+ if(s===null||e===null||s>=e)throw Error('大会の開始・終了時刻を正しく指定してください。');
+ const minutes=intField(d.minutes,1,180,'試合時間'),rest=intField(d.rest,0,180,'最低休憩'),consecutive=intField(d.consecutive,1,10,'最大連戦'),courts=intField(d.courts,0,100,'公式コート数');
+ if(d.categories.length>100)throw Error('カテゴリーは100件以内で指定してください。');
+ const names=new Set(),categories=[];
+ for(const [i,c] of d.categories.entries()){
+  const index=i+1,levels=[...c.levels].sort((a,b)=>a-b);
+  if(!levels.length||levels.some(x=>!Number.isInteger(x)||x<0||x>=CATEGORY_LEVELS.length)||levels.length!==new Set(levels).size||levels.at(-1)-levels[0]+1!==levels.length)throw Error('カテゴリー'+index+'の級別は連続する範囲で選んでください。');
+  if(!CATEGORY_DIVISIONS.includes(c.division))throw Error('カテゴリー'+index+'の参加区分が不正です。');
+  const name=categoryDraftName({...c,levels}),lower=name.toLocaleLowerCase();
+  if(names.has(lower))throw Error('カテゴリー名が重複しています：'+name);names.add(lower);
+  const item={name,display_order:intField(c.order,0,1000,'カテゴリー'+index+'の表示順'),skill_levels:levels.map(j=>CATEGORY_LEVELS[j]),division_type:c.division};
+  if(c.pairs!==''){
+   const pairs=intField(c.pairs,3,64,'カテゴリー'+index+'の募集ペア数'),group=intField(c.group,3,6,'グループ人数'),advance=intField(c.advance,1,2,'進出ペア数');
+   if(!['knockout','round_robin'].includes(c.final))throw Error('決勝形式が不正です。');
+   if(!planGroupings(pairs,advance,group,c.final))throw Error('カテゴリー'+index+'は全組3ペア以上に編成できません。');
+   Object.assign(item,{planned_pairs:pairs,preliminary_group_max_pairs:group,qualifiers_per_group:advance,final_format:c.final});
+  }
+  const any=[c.start,c.end,c.preferred,c.max].some(v=>v!=='');
+  if(any){
+   if([c.start,c.end,c.preferred,c.max].some(v=>v===''))throw Error('カテゴリー'+index+'の開催枠は4項目すべて入力してください。');
+   const cs=parseWindowMinute(c.start),ce=parseWindowMinute(c.end);
+   if(cs===null||ce===null||cs< s||cs>=ce||ce>e-120)throw Error('カテゴリー'+index+'の開催枠は大会時間内・終了120分前までにしてください。');
+   const preferred=intField(c.preferred,1,100,'希望面数'),max=intField(c.max,1,100,'最大面数');
+   if(preferred>max||max>courts)throw Error('カテゴリー'+index+'のコート面数が公式コート上限を超えています。');
+   Object.assign(item,{schedule_start_time:c.start,schedule_end_time:c.end,preferred_courts:preferred,max_courts:max});
+  }
+  categories.push(item);
+ }
+ return {p_name:d.name.trim(),p_event_date:d.date,p_start_time:d.start,p_end_time:d.end,p_match_minutes:minutes,p_minimum_rest_minutes:rest,p_max_consecutive_matches:consecutive,p_official_courts:courts,p_categories:categories};
+}
 async function createTournament(e){
  e.preventDefault();
- const form=$('createTournamentForm'),button=$('createTournamentSubmit'),msg=$('createTournamentMsg');
- if(!form||!button||!msg||!state.auth||!state.systemAdminLoaded||!state.systemAdmin||state.systemAdminError)return;
- const name=$('newTournamentName').value.trim(),date=$('newTournamentDate').value||null;
- const raw=[$('newMatchMinutes').value,$('newRestMinutes').value,$('newConsecutive').value];
- const nums=raw.map(v=>v.trim()===''?NaN:Number(v));
- const [minutes,rest,consecutive]=nums;
- if(!name||name.length>200||!Number.isInteger(minutes)||minutes<1||minutes>180||!Number.isInteger(rest)||rest<0||rest>180||!Number.isInteger(consecutive)||consecutive<1||consecutive>10){msg.textContent='入力値を確認してください。';msg.classList.remove('hide');return;}
- if(!confirm(`「${name}」を新規作成しますか？\n大会は下書きで作成されます。`))return;
- button.disabled=true;msg.classList.add('hide');
+ const button=$('createTournamentSubmit'),msg=$('createTournamentMsg');
+ if(newTournamentBusy||!button||!msg||!client||!state.auth||!state.systemAdminLoaded||!state.systemAdmin||state.systemAdminError)return;
+ let values;try{values=validateNewTournament();}catch(err){msg.textContent=err.message;msg.classList.remove('hide');return;}
+ const summary=`大会：${values.p_name}\n開催：${values.p_event_date} ${values.p_start_time}〜${values.p_end_time}\n公式コート：${values.p_official_courts}面\nカテゴリー：${values.p_categories.length}件\n募集枠設定：${values.p_categories.filter(c=>c.planned_pairs!=null).length}件\n開催枠設定：${values.p_categories.filter(c=>c.schedule_start_time).length}件`;
+ if(!confirm(summary+'\n\nこの内容で下書き大会を一括作成しますか？'))return;
+ newTournamentBusy=true;button.disabled=true;msg.classList.add('hide');
+ let newId=null;
  try{
-  const {data,error}=await client.rpc('system_create_tournament',{p_name:name,p_event_date:date,p_match_minutes:minutes,p_minimum_rest_minutes:rest,p_max_consecutive_matches:consecutive});
-  if(error)throw error;
-  const newId=data;
-  await loadData();
-  categoryForm.tournamentId=newId;prepCreatingTournament=false;prepPage='basic';
-  await refreshAuth();
-  state.tab='manage';render();
-  alert('大会を作成しました。\n大会ID：'+newId);
- }catch(err){const el=$('createTournamentMsg');if(el){el.textContent='大会作成に失敗しました：'+err.message;el.classList.remove('hide')}else alert('大会作成後の再読込に失敗した可能性があります。大会一覧を更新して重複作成を避けてください：'+err.message)}
- finally{if(button.isConnected)button.disabled=false;}
+  const {data,error}=await client.rpc('system_create_tournament_full',values);if(error)throw error;
+  newId=data;
+  await loadData();await refreshAuth();
+  if(state.error||state.courtLoadError)throw Error(state.error||state.courtLoadError||'再読み込み失敗');
+  const t=state.tournaments.find(x=>x.id===newId);
+  const cats=state.categories.filter(x=>x.tournament_id===newId);
+  const courtCount=state.courts.filter(x=>x.tournament_id===newId&&x.is_active&&x.court_type==='official').length;
+  if(!t||t.status!=='draft'||t.name!==values.p_name||String(t.event_date).slice(0,10)!==values.p_event_date||t.start_time?.slice(0,5)!==values.p_start_time||t.end_time?.slice(0,5)!==values.p_end_time||cats.length!==values.p_categories.length||courtCount!==values.p_official_courts||!state.tournamentAdminIds.includes(newId))throw Error('作成後のDB照合ができませんでした');
+  categoryForm.tournamentId=newId;prepCreatingTournament=false;prepPage='basic';state.tab='manage';
+  Object.assign(newTournamentDraft,{name:'',date:'',start:'09:00',end:'17:00',minutes:'15',rest:'0',consecutive:'2',courts:'4',categories:[]});
+  alert('大会を一括作成し、DBの件数と基本情報を照合しました。');
+ }catch(err){
+  const text='作成結果を確認できませんでした：'+err.message+(newId?'。大会が既に作成された可能性があります。再送信せず、更新して大会一覧を確認してください。':'');
+  const m=$('createTournamentMsg');if(m){m.textContent=text;m.classList.remove('hide');}else alert(text);
+ }finally{newTournamentBusy=false;if(button.isConnected)button.disabled=false;render();}
 }
+
 function matches(){return `${controls()}<h2>試合一覧・結果入力</h2><div class="card"><label for="matchNumberSearch">試合番号で検索（M-001、001、1）</label><div class="match-search-bar"><input class="field" id="matchNumberSearch" type="search" inputmode="search" autocomplete="off" placeholder="例：M-001" value="${esc(matchListFilter.query)}"><button class="btn secondary mini-btn" id="clearMatchSearch" type="button">クリア</button></div><label class="match-filter-check"><input type="checkbox" id="pendingMatchesOnly" ${matchListFilter.pendingOnly?'checked':''}>結果未入力の試合のみ表示</label><p class="prompt">取消済みの試合も未入力に表示します。キャンセル試合と不戦勝確定済み試合は除外します。</p></div><p class="match-filter-summary" id="matchSearchCount"></p><div class="grid" id="matchSearchResults"></div>`}
 function courts(){const ms=visibleMatches(),keys=[...new Set(ms.map(m=>m.court_id).filter(Boolean))];return `${controls()}<h2>コート別スケジュール</h2>${keys.map(k=>`<h2>${esc(courtName(k))}</h2><div class="grid">${ms.filter(m=>m.court_id===k).sort((a,b)=>timeOf(a).localeCompare(timeOf(b))).map(matchCard).join('')}</div>`).join('')||'<div class="empty">コート割当済みの試合はありません。</div>'}${ms.some(m=>!m.court_id)?`<h2>コート未割当</h2><div class="grid">${ms.filter(m=>!m.court_id).map(matchCard).join('')}</div>`:''}`}
 function slotDiagram(slots,cat,stage){
@@ -1108,7 +1165,7 @@ function render(){navbar();let top=`<div class="notice blue"><div class="row"><b
  if(pending)pending.onchange=()=>{matchListFilter.pendingOnly=pending.checked;updateMatchListResults()};
  if(clear)clear.onclick=()=>{matchListFilter.query='';if(search){search.value='';search.focus()}updateMatchListResults()};
  updateMatchListResults();
- }const cf=$('createTournamentForm');if(cf)cf.onsubmit=createTournament;const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
+ }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
 async function fetchAll(name,columns='*',order='id'){let out=[],from=0;for(;;){let q=client.from(name).select(columns).range(from,from+499);if(order)q=q.order(order,{ascending:true});let {data,error}=await q;if(error)throw Error(name+' : '+error.message);out.push(...(data||[]));if(!data||data.length<500)break;from+=500;if(from>=10000)throw Error(name+' : 10000行超のため取得を停止しました')}return out}
 let matchNumberLoadVersion=0;
 async function refreshMatchNumbers(){
