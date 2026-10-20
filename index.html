@@ -59,7 +59,7 @@ const CATEGORY_DIVISIONS=['男性','女性','ミックス','フリー'];
 // Draft-only planning values: local to this browser session; never persisted to Supabase.
 const capacityPlans={};
 const PLAN_DEFAULT_PAIRS=16;
-function planGroupings(pairCount,advancePerGroup,maxGroupSize){
+function planGroupings(pairCount,advancePerGroup,maxGroupSize,finalFormat='knockout'){
  const n=Number(pairCount),advance=Number(advancePerGroup),maxSize=Number(maxGroupSize);
  if(!Number.isInteger(n)||n<3||n>64||![1,2].includes(advance)||![3,4,5,6].includes(maxSize))return null;
  // The selected size is a maximum. Use the fewest groups, distributed as evenly as possible.
@@ -69,23 +69,24 @@ function planGroupings(pairCount,advancePerGroup,maxGroupSize){
  if(sizes.some(size=>size<3||size>maxSize||size<advance))return null;
  const preliminary=sizes.reduce((sum,size)=>sum+size*(size-1)/2,0);
  const qualifiers=groupCount*advance;
- const knockout=Math.max(0,qualifiers-1);
- return {sizes,preliminary,qualifiers,knockout,total:preliminary+knockout};
+ if(!['knockout','round_robin'].includes(finalFormat))return null;
+ const knockout=finalFormat==='round_robin'?qualifiers*(qualifiers-1)/2:Math.max(0,qualifiers-1);
+ return {sizes,preliminary,qualifiers,knockout,finalFormat,total:preliminary+knockout};
 }
 function getCapacityPlan(tournamentId,categoryId){
  if(!capacityPlans[tournamentId])capacityPlans[tournamentId]={};
- return capacityPlans[tournamentId][categoryId]||(capacityPlans[tournamentId][categoryId]={pairs:String(PLAN_DEFAULT_PAIRS),advance:'2',groupSize:'4'});
+ return capacityPlans[tournamentId][categoryId]||(capacityPlans[tournamentId][categoryId]={pairs:String(PLAN_DEFAULT_PAIRS),advance:'2',groupSize:'4',finalFormat:'knockout'});
 }
 // Scenario calculation is local-only. Display the latest of four hypothetical outcomes;
 // never claim all real winners or double-entries have been validated.
 const planningSimulation={qualificationMinutes:15};
 
-// STEP 167: bounded, local-only provisional search. Never writes to Supabase.
+// STEP 171: final-stage format selectable per category; local-only provisional search. Never writes to Supabase.
 const recruitmentOptimization={bufferMinutes:15,result:null,tournamentId:null,signature:null,busy:false};
-function recruitmentSignature(t,categories,courts){return JSON.stringify({id:t?.id,start:t?.start_time,end:t?.end_time,match:t?.match_minutes,rest:t?.minimum_rest_minutes,consecutive:t?.max_consecutive_matches,courts,qualification:planningSimulation.qualificationMinutes,buffer:recruitmentOptimization.bufferMinutes,categories:categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return [c.id,p.groupSize,p.advance]})});}
-function recruitmentCandidateCounts(groupMax,advance){
+function recruitmentSignature(t,categories,courts){return JSON.stringify({id:t?.id,start:t?.start_time,end:t?.end_time,match:t?.match_minutes,rest:t?.minimum_rest_minutes,consecutive:t?.max_consecutive_matches,courts,qualification:planningSimulation.qualificationMinutes,buffer:recruitmentOptimization.bufferMinutes,categories:categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return [c.id,p.groupSize,p.advance,p.finalFormat||'knockout']})});}
+function recruitmentCandidateCounts(groupMax,advance,finalFormat){
  const counts=[4,6,8,10,12,16,20,24,32,40,48,56,64];
- return counts.map(n=>{const r=planGroupings(n,advance,groupMax);return r?{pairs:n,total:r.total,groupSizes:r.sizes}:null}).filter(Boolean);
+ return counts.map(n=>{const r=planGroupings(n,advance,groupMax,finalFormat);return r?{pairs:n,total:r.total,groupSizes:r.sizes}:null}).filter(Boolean);
 }
 function calculateRecruitmentSuggestion(t,categories,courtCount,buffer){
  if(!t||!categories.length||categories.length>8)throw Error('対象カテゴリー数は1〜8件で設定してください。');
@@ -93,7 +94,7 @@ function calculateRecruitmentSuggestion(t,categories,courtCount,buffer){
  const start=clock(t.start_time),end=clock(t.end_time),match=Number(t.match_minutes),rest=Number(t.minimum_rest_minutes??0),consecutive=Number(t.max_consecutive_matches??2);
  if(start>=end||!Number.isInteger(match)||match<1||!Number.isInteger(courtCount)||courtCount<1||!Number.isInteger(buffer)||buffer<0||end-120-buffer<=start)throw Error('開催時間・コート・余裕時間を見直してください。');
  const theoretical=courtCount*Math.floor(Math.max(0,end-start-120-buffer)/match);
- const all=categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return recruitmentCandidateCounts(Number(p.groupSize),Number(p.advance))});
+ const all=categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return recruitmentCandidateCounts(Number(p.groupSize),Number(p.advance),p.finalFormat||'knockout')});
  if(all.some(x=>!x.length))return {status:'no_candidates',trials:0};
  // Beam search bounds both runtime and memory as category count increases.
  let beam=[{items:[],matches:0,pairs:0,low:0,high:0}];
@@ -113,7 +114,7 @@ function calculateRecruitmentSuggestion(t,categories,courtCount,buffer){
  const effectiveEnd=String(Math.floor((end-buffer)/60)).padStart(2,'0')+':'+String((end-buffer)%60).padStart(2,'0');
  for(const suggestion of beam.slice(0,120)){
   trials++;
-  const plans=categories.map((c,i)=>{const p=getCapacityPlan(t.id,c.id);return {name:c.name,pairs:suggestion.items[i].pairs,groupMax:Number(p.groupSize),advance:Number(p.advance)}});
+  const plans=categories.map((c,i)=>{const p=getCapacityPlan(t.id,c.id);return {name:c.name,pairs:suggestion.items[i].pairs,groupMax:Number(p.groupSize),advance:Number(p.advance),finalFormat:p.finalFormat||'knockout'}});
   const r=v10ScheduleEngine.simulate({start:String(t.start_time).slice(0,5),end:effectiveEnd,reservedMinutes:120,matchMinutes:match,restMinutes:rest,maxConsecutive:consecutive,courts:courtCount,qualificationMinutes:planningSimulation.qualificationMinutes,categories:plans,scenarios:4});
   if(r.status==='fits_all_tested_scenarios'){
    const worst=Math.max(...r.runs.map(v=>v.finishMinute));
@@ -152,7 +153,7 @@ function applyRecruitmentSuggestion(){
 
 function schedulePlanningSection(t,categories,officialCourtCount,ready){
  if(!t||!categories.length)return '';
- const validPlans=categories.map(c=>{const p=getCapacityPlan(t.id,c.id),r=planGroupings(p.pairs,p.advance,p.groupSize);return r?{name:c.name,pairs:Number(p.pairs),groupMax:Number(p.groupSize),advance:Number(p.advance)}:null});
+ const validPlans=categories.map(c=>{const p=getCapacityPlan(t.id,c.id),r=planGroupings(p.pairs,p.advance,p.groupSize,p.finalFormat||'knockout');return r?{name:c.name,pairs:Number(p.pairs),groupMax:Number(p.groupSize),advance:Number(p.advance),finalFormat:p.finalFormat||'knockout'}:null});
  const start=t.start_time?.slice(0,5),end=t.end_time?.slice(0,5),minutes=Number(t.match_minutes);
  const rest=Number(t.minimum_rest_minutes??0),maxConsecutive=Number(t.max_consecutive_matches??2);
  const qualificationMinutes=planningSimulation.qualificationMinutes;
@@ -181,15 +182,15 @@ function capacityPlanningSection(t,categories,availableSlots){
   const plan=getCapacityPlan(t.id,c.id);
   const result=planGroupings(plan.pairs,plan.advance,plan.groupSize);
   const counts=[4,6,8,10,12,16,20,24,32];
-  return `<div class="card stack"><h3>${esc(c.name)}</h3><div class="grid"><div><label for="planPairs-${esc(c.id)}">募集ペア数（3〜64）</label><input id="planPairs-${esc(c.id)}" class="field" type="number" min="3" max="64" step="1" inputmode="numeric" data-plan-pairs="${esc(c.id)}" value="${esc(plan.pairs)}"><p class="prompt">推奨：${counts.join('・')}ペア</p></div><div><label for="planGroupSize-${esc(c.id)}">1グループの最大ペア数（全組共通）</label><select id="planGroupSize-${esc(c.id)}" class="field" data-plan-group-size="${esc(c.id)}">${[3,4,5,6].map(n=>opt(String(n),`${n}ペア`,plan.groupSize)).join('')}</select></div><div><label for="planAdvance-${esc(c.id)}">各予選組の決勝進出数</label><select id="planAdvance-${esc(c.id)}" class="field" data-plan-advance="${esc(c.id)}">${opt('1','上位1ペア',plan.advance)}${opt('2','上位2ペア',plan.advance)}</select></div></div>${result?`<p class="prompt">予選リーグ：${esc(result.sizes.join('・'))}ペア（${result.sizes.length}組）</p><div class="row"><span>予選 ${result.preliminary}試合 ＋ 決勝 ${result.knockout}試合</span><b>${result.total}試合</b></div>${result.qualifiers===1?'<p class="prompt">予選1組から1ペアのみ進出するため、決勝トーナメントはありません。</p>':''}`:'<div class="empty-error">選択した最大ペア数では全組3ペア以上に均等配分できません。募集ペア数かグループ人数を変更してください。</div>'}</div>`;
+  return `<div class="card stack"><h3>${esc(c.name)}</h3><div class="grid"><div><label for="planPairs-${esc(c.id)}">募集ペア数（3〜64）</label><input id="planPairs-${esc(c.id)}" class="field" type="number" min="3" max="64" step="1" inputmode="numeric" data-plan-pairs="${esc(c.id)}" value="${esc(plan.pairs)}"><p class="prompt">推奨：${counts.join('・')}ペア</p></div><div><label for="planGroupSize-${esc(c.id)}">1グループの最大ペア数（全組共通）</label><select id="planGroupSize-${esc(c.id)}" class="field" data-plan-group-size="${esc(c.id)}">${[3,4,5,6].map(n=>opt(String(n),`${n}ペア`,plan.groupSize)).join('')}</select></div><div><label for="planAdvance-${esc(c.id)}">各予選組の決勝進出数</label><select id="planAdvance-${esc(c.id)}" class="field" data-plan-advance="${esc(c.id)}">${opt('1','上位1ペア',plan.advance)}${opt('2','上位2ペア',plan.advance)}</select></div><div><label for="planFinalFormat-${esc(c.id)}">決勝形式</label><select id="planFinalFormat-${esc(c.id)}" class="field" data-plan-final-format="${esc(c.id)}">${opt('knockout','シングルエリミネーション',plan.finalFormat||'knockout')}${opt('round_robin','総当たり（1回戦）',plan.finalFormat||'knockout')}</select></div></div>${result?`<p class="prompt">予選リーグ：${esc(result.sizes.join('・'))}ペア（${result.sizes.length}組）</p><div class="row"><span>予選 ${result.preliminary}試合 ＋ 決勝（${result.finalFormat==='round_robin'?'総当たり':'シングルエリミネーション'}）${result.knockout}試合</span><b>${result.total}試合</b></div>${result.qualifiers===1?'<p class="prompt">決勝進出が1ペアのため、決勝の対戦試合はありません。</p>':''}`:'<div class="empty-error">選択した最大ペア数では全組3ペア以上に均等配分できません。募集ペア数かグループ人数を変更してください。</div>'}</div>`;
  });
- const results=categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return planGroupings(p.pairs,p.advance,p.groupSize)});
+ const results=categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return planGroupings(p.pairs,p.advance,p.groupSize,p.finalFormat||'knockout')});
  const valid=categories.length>0&&results.every(Boolean);
  const required=valid?results.reduce((sum,r)=>sum+r.total,0):null;
  const ready=availableSlots!==null&&Number.isFinite(availableSlots);
  const ratio=valid&&ready&&availableSlots>0?required/availableSlots*100:null;
  const summary=categories.length===0?'<div class="notice">募集枠を試算するには、先にカテゴリーを追加してください。</div>':!valid?'<div class="notice">入力値に不備があります。すべてのカテゴリーの募集ペア数を確認してください。</div>':!ready?'<div class="notice">収容力を比較するには開催時間と公式戦用コートを設定・取得してください。</div>':`<div class="metrics"><div class="metric"><small>必要試合数</small><strong>${required}</strong></div><div class="metric"><small>理論試合枠</small><strong>${availableSlots}</strong></div><div class="metric"><small>残り枠（概算）</small><strong>${availableSlots-required}</strong></div></div>${ratio===null?'<div class="notice">理論上の試合枠が0です。</div>':`<div class="progress"><div style="width:${Math.min(100,ratio)}%;background:${ratio>100?'#bb5949':'#219a7b'}"></div></div><p class="prompt">理論枠使用率：${ratio.toFixed(1)}%</p>`}<div class="notice ${required>availableSlots?'':'blue'}">${required>availableSlots?'必要試合数が理論枠を超えています。':'試合数は理論枠内ですが、時間内に終了できる保証はありません。'}</div>`;
- return `<h2>大会全体の募集枠シミュレーション</h2><div class="notice blue">カテゴリーごとに募集ペア数と進出条件を設定し、予選・決勝の必要試合数を比較します。<b>試算は保存されません。</b> 予選は各カテゴリーで選んだ最大3〜6ペアを上限に、全組3ペア以上で均等配分した1回総当たりです。決勝はシングルエリミネーション（BYEは試合数に含めません）。</div>${cards.join('')}${summary}<p class="prompt">開催時間から設営・受付・表彰・撤収の120分を控除済みです。3位決定戦、休憩、連戦制限、ダブルエントリー、予選と決勝の進行待ちは未反映です。募集枠の確定には別途スケジュール検証が必要です。</p>`;
+ return `<h2>大会全体の募集枠シミュレーション</h2><div class="notice blue">カテゴリーごとに募集ペア数と進出条件を設定し、予選・決勝の必要試合数を比較します。<b>試算は保存されません。</b> 予選は各カテゴリーで選んだ最大3〜6ペアを上限に、全組3ペア以上で均等配分した1回総当たりです。決勝はカテゴリーごとにシングルエリミネーション（BYEは試合数に含めません）または1回総当たりを選択できます。</div>${cards.join('')}${summary}<p class="prompt">開催時間から設営・受付・表彰・撤収の120分を控除済みです。3位決定戦、休憩、連戦制限、ダブルエントリー、予選と決勝の進行待ちは未反映です。募集枠の確定には別途スケジュール検証が必要です。</p>`;
 }
 
 const v10ScheduleEngine=(()=>{
@@ -213,9 +214,13 @@ function buildCategory(c,ci,scenario){
   const rotated=ids.map((_,i)=>ids[(i+(scenario%size))%size]);
   qualifiers.push(...rotated.slice(0,advance));
  });
- // Deterministic simulated single elimination bracket with BYEs; actual qualification/ranking unknown.
+ // Provisional final matches, independent of the database bracket.
+ const finalFormat=c.finalFormat||'knockout';
+ if(!['knockout','round_robin'].includes(finalFormat))throw Error('invalid final format');
  const knockouts=[];let participants=qualifiers.slice(),round=1;
- if(participants.length>=2){
+ if(finalFormat==='round_robin'){
+  for(let i=0;i<participants.length;i++)for(let j=i+1;j<participants.length;j++)knockouts.push({id:`R-${ci}-${i}-${j}`,phase:'knockout',category:c.name,round:1,pairs:[participants[i],participants[j]]});
+ }else if(participants.length>=2){
   const bracketSlots=power2(participants.length);
   const byeCount=bracketSlots-participants.length;
   // The fixed BYE seeds advance without creating a scheduled match.
@@ -237,8 +242,8 @@ function buildCategory(c,ci,scenario){
    participants=winners;round++;
   }
  }
- const summary={category:c.name,pairs:c.pairs,groupMax:c.groupMax,groupSizes:sizes,qualifiers:qualifiers.length,preliminary:prelim.length,knockout:knockouts.length,total:prelim.length+knockouts.length};
- if(summary.preliminary!==sizes.reduce((s,x)=>s+choose2(x),0)||summary.knockout!==Math.max(0,qualifiers.length-1))throw Error('count mismatch');
+ const summary={category:c.name,pairs:c.pairs,groupMax:c.groupMax,groupSizes:sizes,qualifiers:qualifiers.length,finalFormat,preliminary:prelim.length,knockout:knockouts.length,total:prelim.length+knockouts.length};
+ if(summary.preliminary!==sizes.reduce((s,x)=>s+choose2(x),0)||summary.knockout!==(finalFormat==='round_robin'?choose2(qualifiers.length):Math.max(0,qualifiers.length-1)))throw Error('count mismatch');
  return {prelim,knockouts,summary};
 }
 function scheduleScenario(config,scenario=0){
@@ -272,7 +277,7 @@ function scheduleScenario(config,scenario=0){
  let progress=phase(built.flatMap(c=>c.prelim),begin);
  if(progress.pending.length)return {status:'not_scheduled_by_greedy',scenario,phase:'preliminary',unscheduled:progress.pending.length+summaries.reduce((a,s)=>a+s.knockout,0),summaries,schedule,deadlineMinute:deadline,finishMinute:Math.max(begin,...schedule.map(s=>s.endMinute))};
  const preliminaryEnd=Math.max(begin,...schedule.map(s=>s.endMinute));
- // Explicit time for standings approval/qualifier confirmation before knockout starts.
+ // Explicit time for standings approval/qualifier confirmation before the final stage starts.
  const knockoutEarliest=preliminaryEnd+qualificationMinutes;
  let at=knockoutEarliest;
  const lastRound=Math.max(0,...built.flatMap(c=>c.knockouts.map(k=>k.round)));
@@ -610,7 +615,7 @@ function resolveRankingModal(key){
  };
 }
 function pairs(){const ps=state.pairs.filter(p=>state.category==='all'||p.category_id===state.category).filter(p=>state.tournament==='all'||state.categories.find(c=>c.id===p.category_id)?.tournament_id===state.tournament);const selected=ps.find(p=>p.id===state.pair)||ps[0];return `${controls()}<h2>ペア別試合検索</h2><label>ペアを選択</label><select class="field" id="pairFilter">${ps.map(p=>opt(p.id,p.display_name,selected?.id)).join('')}</select>${selected?`<div class="card"><b>${esc(selected.display_name)}</b> <small class="muted">${esc(catName(selected.category_id))}</small></div><div class="grid">${visibleMatches().filter(m=>m.pair_a_id===selected.id||m.pair_b_id===selected.id).map(matchCard).join('')||'<div class="empty">試合がありません。</div>'}</div>`:'<div class="empty">ペアがありません。</div>'}`}
-function render(){navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':({home,matches,courts,bracket,ranking,pairs,manage})[state.tab]();$('screen').innerHTML=top+content+'<footer>v10開発プレビュー｜V9画面デザインを踏襲</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));document.querySelectorAll('[data-official-confirm]').forEach(b=>b.onclick=()=>confirmOfficial(b.dataset.officialConfirm));document.querySelectorAll('[data-official-revoke]').forEach(b=>b.onclick=()=>revokeOfficial(b.dataset.officialRevoke));document.querySelectorAll('[data-ranking-approve]').forEach(b=>b.onclick=()=>approveRanking(b.dataset.rankingApprove));document.querySelectorAll('[data-ranking-revoke]').forEach(b=>b.onclick=()=>revokeRanking(b.dataset.rankingRevoke));document.querySelectorAll('[data-ranking-resolve]').forEach(b=>b.onclick=()=>resolveRankingModal(b.dataset.rankingResolve));wireControls();const cf=$('createTournamentForm');if(cf)cf.onsubmit=createTournament;const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{getCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs).pairs=el.value;render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{getCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize).groupSize=el.value;render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{getCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance).advance=el.value;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const ct=$('manageTournament');if(ct)ct.onchange=()=>{categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
+function render(){navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':({home,matches,courts,bracket,ranking,pairs,manage})[state.tab]();$('screen').innerHTML=top+content+'<footer>v10開発プレビュー｜V9画面デザインを踏襲</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));document.querySelectorAll('[data-official-confirm]').forEach(b=>b.onclick=()=>confirmOfficial(b.dataset.officialConfirm));document.querySelectorAll('[data-official-revoke]').forEach(b=>b.onclick=()=>revokeOfficial(b.dataset.officialRevoke));document.querySelectorAll('[data-ranking-approve]').forEach(b=>b.onclick=()=>approveRanking(b.dataset.rankingApprove));document.querySelectorAll('[data-ranking-revoke]').forEach(b=>b.onclick=()=>revokeRanking(b.dataset.rankingRevoke));document.querySelectorAll('[data-ranking-resolve]').forEach(b=>b.onclick=()=>resolveRankingModal(b.dataset.rankingResolve));wireControls();const cf=$('createTournamentForm');if(cf)cf.onsubmit=createTournament;const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{getCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs).pairs=el.value;render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{getCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize).groupSize=el.value;render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{getCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance).advance=el.value;render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{getCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat).finalFormat=el.value;recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const ct=$('manageTournament');if(ct)ct.onchange=()=>{categoryForm.tournamentId=ct.value;categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
 async function fetchAll(name,columns='*',order='id'){let out=[],from=0;for(;;){let q=client.from(name).select(columns).range(from,from+499);if(order)q=q.order(order,{ascending:true});let {data,error}=await q;if(error)throw Error(name+' : '+error.message);out.push(...(data||[]));if(!data||data.length<500)break;from+=500;if(from>=10000)throw Error(name+' : 10000行超のため取得を停止しました')}return out}
 async function loadData(){if(!client){state.error='Supabaseに接続できません。公開用設定を確認してください。';render();return}state.loading=true;state.error='';render();try{let [t,c,s,p,m]=await Promise.all([fetchAll('tournaments'),fetchAll('categories'),fetchAll('competition_stages'),fetchAll('pairs'),fetchAll('matches')]);state.tournaments=t;state.categories=c;state.stages=s;state.pairs=p;state.matches=m;state.bracketSlots=[];state.bracketError='';state.officialResults=[];state.officialError='';state.officialLoaded=false;const officialResult=await client.rpc('get_public_category_final_results');if(officialResult.error){state.officialError=officialResult.error.message}else{state.officialResults=officialResult.data||[];state.officialLoaded=true}const slotResult=await client.rpc('get_public_knockout_bracket_slots');if(slotResult.error){state.bracketError=slotResult.error.message}else{state.bracketSlots=slotResult.data||[]}state.courtLoadError='';try{state.courts=await fetchAll('courts','id,name,tournament_id,court_type,is_active');}catch(courtError){state.courts=[];state.courtLoadError=courtError.message;}state.lastLoaded=new Date()}catch(e){state.error='データ取得に失敗しました：'+e.message}finally{state.loading=false;render();if(!state.error)await refreshRankings()}}
 function closeModal(){ $('overlay').innerHTML='' }
