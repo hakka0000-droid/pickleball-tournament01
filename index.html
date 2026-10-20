@@ -345,12 +345,11 @@ function flexibleCourtAuditSection(t,categories,courtCount,runs){
  const allOk=audits.every(a=>a.ok),first=audits[0];
  const rows=first.rows.map(r=>{
   const allocations=categories.map(c=>`${esc(c.name)}：${r.categoryUsage.get(c.id)||0}面`).join(' ／ ');
-  const detail=r.courts.map(m=>`${esc(m.court)}番：${esc(m.category)}（${m.phase==='preliminary'?'予選':'決勝'}）`).join(' ／ ');
-  return `<tr><td>${fmt(r.at)}〜${fmt(r.at+Number(t.match_minutes))}</td><td>${allocations}</td><td><b>${r.used} / ${courtCount}面</b></td><td>${detail}</td></tr>`;
+  return `<tr><td>${fmt(r.at)}〜${fmt(r.at+Number(t.match_minutes))}</td><td>${allocations}</td><td><b>${r.used} / ${courtCount}面</b></td></tr>`;
  }).join('');
  const summary=audits.map((a,i)=>`ケース${i+1}：${a.ok?'割当競合なし':'競合検出'}／ピーク${a.peak}面`).join(' ／ ');
  const problems=audits.flatMap((a,i)=>a.errors.map(e=>`ケース${i+1}：${e}`));
- return `<h3>時間帯別コート使用状況・競合検証</h3><div class="notice ${allOk?'blue':''}"><b>${allOk?'仮配置4ケースすべてでコート・開催枠の競合は検出されませんでした。':'仮配置に競合が検出されました。'}</b><p class="prompt">${esc(summary)}</p>${problems.length?`<p>${esc([...new Set(problems)].join(' ／ '))}</p>`:''}</div><details><summary style="cursor:pointer;font-weight:700;padding:9px 0">ケース1の時間帯別・コート別割当を表示（${first.rows.length}枠）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>時刻</th><th>カテゴリー別使用面数</th><th>合計</th><th>コート別内訳</th></tr></thead><tbody>${rows||'<tr><td colspan="4">配置された試合がありません。</td></tr>'}</tbody></table></div></details><p class="prompt">使用面数は各試合開始時刻の仮割当から集計しています。4ケースについて同時刻・同一コート、カテゴリー上限、大会のコート数、開催期限を独立に検査しています。競合なしは全試合が配置できたことを意味しません。開始時刻が試合時間単位でそろう現行の仮シミュレーションを対象とし、実試合の公開可否判定ではありません。</p>`;
+ return `<h3>時間帯別コート使用状況・競合検証</h3><div class="notice ${allOk?'blue':''}"><b>${allOk?'仮配置4ケースすべてでコート・開催枠の競合は検出されませんでした。':'仮配置に競合が検出されました。'}</b><p class="prompt">${esc(summary)}</p>${problems.length?`<p>${esc([...new Set(problems)].join(' ／ '))}</p>`:''}</div><details><summary style="cursor:pointer;font-weight:700;padding:9px 0">ケース1の時間帯別使用面数を表示（${first.rows.length}枠）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>時刻</th><th>カテゴリー別使用面数</th><th>合計</th></tr></thead><tbody>${rows||'<tr><td colspan="3">配置された試合がありません。</td></tr>'}</tbody></table></div></details><p class="prompt">使用面数は各試合開始時刻の仮割当から集計しています。4ケースについて同時刻・同一コート、カテゴリー上限、大会のコート数、開催期限を独立に検査しています。競合なしは全試合が配置できたことを意味しません。開始時刻が試合時間単位でそろう現行の仮シミュレーションを対象とし、実試合の公開可否判定ではありません。</p>`;
 }
 function flexibleSchedulePlanningSection(t,categories,courtCount){
  const fmt=m=>Number.isFinite(m)?`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`:'—';
