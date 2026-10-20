@@ -1095,17 +1095,48 @@ async function publishTournament(){
 function printTournament(){
  const t=state.tournaments.find(x=>x.id===categoryForm.tournamentId);
  if(!t||state.loading||state.error||state.courtLoadError)return;
- const cats=state.categories.filter(c=>c.tournament_id===t.id).sort((a,b)=>(a.display_order||0)-(b.display_order||0));
+ const cats=state.categories.filter(c=>c.tournament_id===t.id).sort((a,b)=>(a.display_order||0)-(b.display_order||0)||a.name.localeCompare(b.name,'ja'));
  const ms=tournamentMatches(t.id).slice().sort((a,b)=>(a.start_time||'').localeCompare(b.start_time||'')||courtName(a.court_id).localeCompare(courtName(b.court_id),'ja',{numeric:true}));
  if(!ms.length){alert('印刷する試合がありません。');return;}
- const printable=window.open('','_blank');if(!printable){alert('印刷用画面を開けませんでした。ポップアップの許可を確認してください。');return;}
- const draft=t.status==='draft';
- const code=m=>matchCode(m)?esc(matchCode(m)):'—';
- const time=m=>m.start_time?new Date(m.start_time).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'未割当';
- const table=arr=>`<table><thead><tr><th>試合番号</th><th>開始</th><th>コート</th><th>組</th><th>対戦</th><th>結果記録</th></tr></thead><tbody>${arr.map(m=>`<tr><td>${code(m)}</td><td>${esc(time(m))}</td><td>${esc(courtName(m.court_id))}</td><td>${esc(m.group_name||'—')}</td><td>${esc(pairName(m.pair_a_id))} vs ${esc(pairName(m.pair_b_id))}</td><td>＿＿ 対 ＿＿</td></tr>`).join('')}</tbody></table>`;
- const categorySheets=cats.map(c=>{const games=ms.filter(m=>m.category_id===c.id);return `<section class="sheet"><h2>${esc(c.name)} ／ 対戦表</h2>${games.length?table(games):'<p>対戦表は未作成です。</p>'}</section>`;}).join('');
- const doc=`<!doctype html><html lang="ja"><head><meta charset="UTF-8"><title>${esc(t.name)} 印刷用</title><style>@page{size:A4 landscape;margin:12mm}body{font-family:system-ui,-apple-system,sans-serif;color:#111;margin:25px;font-size:12px}h1{font-size:21px}h2{font-size:17px;margin:18px 0 10px}p{line-height:1.5}table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}th,td{border:1px solid #555;padding:7px 5px;overflow-wrap:anywhere}th{background:#eee}th:nth-child(5){width:33%}.sheet{break-before:page}.hint{background:#eee;padding:9px}.no-print{margin:10px 0 20px}button{font-size:16px;padding:10px 20px}@media print{.no-print{display:none}body{margin:0}.sheet{break-before:page}tr{break-inside:avoid}}</style></head><body><div class="no-print"><button onclick="window.print()">印刷する / PDFとして保存</button></div><h1>${esc(t.name)} ${draft?'【確認用・非公開】':'【'+esc(t.status)+'】'}</h1><p>開催日：${esc(t.event_date||'未設定')}　開催時間：${esc((t.start_time||'').slice(0,5))}〜${esc((t.end_time||'').slice(0,5))}</p><p class="hint">${draft?'この資料は非公開大会の確認用です。配布前に内容を確認してください。':'当日は紙の記録欄に結果を記入し、復旧後にシステムへ入力してください。'}</p><h2>時間割（全${ms.length}試合）</h2>${table(ms)}${categorySheets}</body></html>`;
- printable.document.open();printable.document.write(doc);printable.document.close();
+ const popup=window.open('','_blank');if(!popup){alert('印刷画面を開けませんでした。ポップアップを許可してください。');return;}
+ const colorBases=[['#d9eee4','#b7ddcc','#21684f'],['#dceafa','#bdd6f2','#285b90'],['#fff0dc','#f9d6a9','#90591d'],['#f1e3f8','#dec4ed','#72458c'],['#fae2e5','#f0c1cb','#903e52'],['#e5eeef','#c2d8dc','#365b64']];
+ const palette=new Map(cats.map((c,i)=>[c.id,colorBases[i%colorBases.length]]));
+ const groupNames=new Map(cats.map(c=>[c.id,[...new Set(state.pairs.filter(p=>p.category_id===c.id&&p.group_name).map(p=>p.group_name).concat(ms.filter(m=>m.category_id===c.id&&m.group_name).map(m=>m.group_name)))].sort((a,b)=>String(a).localeCompare(String(b),'ja',{numeric:true}))]));
+ const styleFor=(catId,group)=>{const p=palette.get(catId)||colorBases[0],idx=Math.max(0,(groupNames.get(catId)||[]).indexOf(group));return `background:${p[idx%2]};border-top:4px solid ${p[2]};`;};
+ const matchCodeText=m=>matchCode(m)?esc(matchCode(m)):'—';
+ const timeText=m=>m.start_time?new Date(m.start_time).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'}):'未割当';
+ const courts=state.courts.filter(c=>c.tournament_id===t.id&&c.is_active&&c.court_type==='official').slice();
+ ms.forEach(m=>{if(m.court_id&&!courts.some(c=>c.id===m.court_id)){const c=state.courts.find(x=>x.id===m.court_id);if(c)courts.push(c);}});
+ courts.sort((a,b)=>a.name.localeCompare(b.name,'ja',{numeric:true}));
+ const assigned=ms.filter(m=>m.start_time&&m.court_id),unassigned=ms.filter(m=>!m.start_time||!m.court_id);
+ const timeKeys=[...new Set(assigned.map(timeText))].sort();
+ const slotMap=new Map();
+ assigned.forEach(m=>{const key=timeText(m)+'|'+m.court_id;if(!slotMap.has(key))slotMap.set(key,[]);slotMap.get(key).push(m);});
+ const matchTile=m=>`<div class="game-tile" style="${styleFor(m.category_id,m.group_name)}"><div class="tile-top"><b>${matchCodeText(m)}</b><b>${esc(m.group_name||'—')}組</b></div><div class="tile-category">${esc(catName(m.category_id))}</div><div class="tile-teams">${esc(pairName(m.pair_a_id))}<span class="vs">vs</span>${esc(pairName(m.pair_b_id))}</div></div>`;
+ const schedule=`<table class="schedule"><thead><tr><th class="time-head">開始</th>${courts.map(c=>`<th>${esc(c.name)}</th>`).join('')}</tr></thead><tbody>${timeKeys.map(time=>`<tr><th class="time-head">${esc(time)}</th>${courts.map(c=>{const games=slotMap.get(time+'|'+c.id)||[];return `<td>${games.length?games.map(matchTile).join(''):'<div class="empty-slot">—</div>'}</td>`;}).join('')}</tr>`).join('')}</tbody></table>`;
+ const headings=`<h1>${esc(t.name)} <span class="draft">${t.status==='draft'?'【確認用・非公開】':'【'+esc(t.status)+'】'}</span></h1><p class="subtitle">開催日：${esc(t.event_date||'未設定')} ／ 開催時間：${esc((t.start_time||'').slice(0,5))}〜${esc((t.end_time||'').slice(0,5))}</p>`;
+ const groupSheets=[];
+ for(const c of cats){
+   const groups=groupNames.get(c.id)||[];
+   for(const g of groups){
+     const pairs=state.pairs.filter(p=>p.category_id===c.id&&p.group_name===g&&p.participation_status==='active').slice().sort((a,b)=>a.display_name.localeCompare(b.display_name,'ja')||a.id.localeCompare(b.id));
+     const games=ms.filter(m=>m.category_id===c.id&&m.group_name===g);
+     if(!pairs.length&&!games.length)continue;
+     const included=[...pairs];
+     const pairIds=new Set(included.map(p=>p.id));
+     for(const m of games)for(const id of [m.pair_a_id,m.pair_b_id])if(id&&!pairIds.has(id)){const p=state.pairs.find(x=>x.id===id&&x.category_id===c.id);if(p){included.push(p);pairIds.add(id);}}
+     const names=included.map(p=>p.display_name||[p.player1,p.player2].filter(Boolean).join(' / ')||'名前未登録');
+     const matchLookup=new Map(games.filter(m=>m.pair_a_id&&m.pair_b_id).map(m=>[[m.pair_a_id,m.pair_b_id].sort().join('|'),m]));
+     const matrix=included.map((p,i)=>`<tr><th class="rowhead"><div class="pair-number">${i+1}</div>${esc(names[i])}</th>${included.map((other,j)=>{if(i===j)return '<td class="diagonal">—</td>';const match=matchLookup.get([p.id,other.id].sort().join('|'));return `<td class="write-score">${i<j?`<span class="match-num">${match?matchCodeText(match):'未登録'}</span><span class="score-blank">　　　—　　　</span>`:'<span class="mirror">↑ 対戦結果は上段へ記入</span>'}</td>`;}).join('')}<td class="summary-cell"></td><td class="summary-cell"></td></tr>`).join('');
+     const n=included.length;
+     const table=n>=2?`<table class="league"><thead><tr><th class="rowhead">ペア</th>${included.map((p,i)=>`<th>${i+1}<small>${esc(names[i])}</small></th>`).join('')}<th class="summary-head">勝敗</th><th class="summary-head">順位</th></tr></thead><tbody>${matrix}</tbody></table>`:'<p>組の登録ペアが不足しています。</p>';
+     groupSheets.push(`<section class="sheet"><div class="group-banner" style="${styleFor(c.id,g)}"><h2>${esc(c.name)} ／ ${esc(g)}組　リーグ表</h2><p>${n}ペア ／ ${games.length}試合</p></div>${table}<p class="league-notes">スコアは対戦する2ペアの交点（右上側）に手書きで記録してください。勝敗・順位は集計後に記入してください。正式な順位はアプリで確認・承認します。</p></section>`);
+   }
+   if(!groups.length)groupSheets.push(`<section class="sheet"><div class="group-banner" style="background:${palette.get(c.id)?.[0]||'#eee'}"><h2>${esc(c.name)} ／ リーグ表</h2></div><p>組分けは未登録です。</p></section>`);
+ }
+ const others=unassigned.length?`<section class="sheet"><h2>未割当試合（要確認）</h2><table class="simple"><tr><th>試合</th><th>カテゴリー・組</th><th>対戦</th></tr>${unassigned.map(m=>`<tr><td>${matchCodeText(m)}</td><td>${esc(catName(m.category_id))}・${esc(m.group_name||'—')}組</td><td>${esc(pairName(m.pair_a_id))} vs ${esc(pairName(m.pair_b_id))}</td></tr>`).join('')}</table></section>`:'';
+ const doc=`<!doctype html><html lang="ja"><head><meta charset="UTF-8"><title>${esc(t.name)}｜時間割・予選リーグ表</title><style>@page{size:A4 landscape;margin:12mm}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN',Meiryo,sans-serif;color:#1e2e36;margin:0;font-size:11px}h1{font-size:19px;margin:0 0 5px}h2{font-size:16px;margin:0}.subtitle{margin:3px 0 9px;font-size:11px}.draft{font-size:12px;color:#805f2d}.toolbar{margin:0 0 15px}.toolbar button{font:inherit;padding:9px 15px}.page-title{font-size:15px;margin:13px 0 7px}.legend{font-size:10px;margin:0 0 8px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #aab9c0;vertical-align:top;overflow-wrap:anywhere}.schedule th{background:#e7eef3;padding:7px 4px}.schedule td{padding:3px;height:87px}.time-head{width:59px;text-align:center;vertical-align:middle;font-size:13px}.game-tile{border-radius:3px;padding:5px 7px;min-height:77px;margin-bottom:3px;print-color-adjust:exact;-webkit-print-color-adjust:exact}.tile-top{display:flex;justify-content:space-between;gap:8px;font-size:11px}.tile-category{font-size:9px;margin:2px 0}.tile-teams{font-size:11px;font-weight:700;display:flex;flex-direction:column;gap:1px}.vs{font-size:8px;font-weight:400;text-align:center}.empty-slot{text-align:center;color:#999;padding:25px 0}.sheet{break-before:page;page-break-before:always}.group-banner{border-radius:4px;padding:10px 13px;margin:0 0 12px;print-color-adjust:exact;-webkit-print-color-adjust:exact}.group-banner p{margin:3px 0 0;font-size:11px}.league th{background:#f4f7f9;padding:8px 4px;text-align:center;vertical-align:middle}.league th small{display:block;font-size:9px;font-weight:400;margin-top:3px}.league .rowhead{width:126px;text-align:left;padding:8px;font-size:11px}.pair-number{display:inline-block;background:#d8e6e9;border-radius:12px;padding:2px 6px;margin-right:6px}.league td{height:67px;padding:5px;text-align:center;vertical-align:middle}.league .diagonal{background:#e7ecef;color:#75848d}.match-num{display:block;text-align:left;font-size:9px;color:#3c6170}.score-blank{display:block;font-weight:700;margin-top:9px;font-size:12px;white-space:nowrap}.mirror{font-size:9px;color:#89959b}.summary-head,.summary-cell{width:56px}.league-notes{font-size:10px;margin:11px 0}.simple th,.simple td{padding:9px}@media print{.toolbar{display:none}body{margin:0}tr{break-inside:avoid;page-break-inside:avoid}.sheet{break-before:page;page-break-before:always}}</style></head><body><div class="toolbar"><button onclick="window.print()">印刷する / PDFとして保存</button></div>${headings}<h2 class="page-title">コート別時間割（${ms.length}試合）</h2><p class="legend">時間帯を縦、コートを横に表示。カテゴリーと組の色はリーグ表にも共通です。スコアはリーグ表に記入してください。</p>${schedule}${others}${groupSheets.join('')}</body></html>`;
+ popup.document.open();popup.document.write(doc);popup.document.close();
 }
 
 function manage(){
