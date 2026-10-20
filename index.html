@@ -729,18 +729,38 @@ async function savePreliminaryGroups(){
 }
 // STEP 22-6-9-37: read-only diagnostics for the preliminary-group save gate.
 // These indicators expose only existing in-memory status; no RPC and no writes.
-function groupSaveDiagnosticSection(t,cat){
+function groupSaveDiagnosticSection(t,cat,active,selected){
+  // STEP 22-6-9-39: show every remaining gate without changing authorization or writes.
+  const savedAssignments=state.pairs.filter(p=>p.category_id===cat.id&&p.group_name!=null).length;
+  const existingMatches=state.matches.filter(m=>m.category_id===cat.id).length;
+  const approved=state.approved.filter(a=>a.category_id===cat.id).length;
+  const locked=state.qualificationLocks.includes(cat.id);
+  const official=state.officialResults.filter(r=>r.category_id===cat.id);
+  const bracket=state.bracketSlots.filter(s=>state.stages.some(st=>st.id===s.stage_id&&st.category_id===cat.id));
+  const sizeTotal=selected?selected.sizes.reduce((a,b)=>a+b,0):null;
   const statuses=[
-    ['スタッフ認証',!!state.staff,state.staffError],
-    ['大会管理者権限',!!state.auth&&state.tournamentAdminLoaded&&!state.tournamentAdminError&&state.tournamentAdminIds.includes(t.id),state.tournamentAdminError||(!state.tournamentAdminLoaded?'権限の取得が完了していません':!state.tournamentAdminIds.includes(t.id)?'この大会の管理者として確認できません':'')],
-    ['順位承認情報',state.approvedLoaded&&!state.approvedError,state.approvedError||(!state.approvedLoaded?'読み込み未完了':'')],
-    ['決勝進出者の確定情報',state.qualificationLocksLoaded&&!state.qualificationLocksError,state.qualificationLocksError||(!state.qualificationLocksLoaded?'読み込み未完了':'')],
-    ['正式結果情報',state.officialLoaded&&!state.officialError,state.officialError||(!state.officialLoaded?'読み込み未完了':'')],
-    ['対戦表情報',!state.bracketError,state.bracketError],
-    ['画面データ読み込み',!state.loading&&!state.error,state.error|| (state.loading?'読み込み中':'')]
+    ['Supabase接続',!!client,'クライアントが利用できません'],
+    ['画面の対象・モード',!!t&&!!cat&&groupingPreview.mode==='actual',groupingPreview.mode!=='actual'?'仮データモードです':'対象大会・カテゴリーがありません'],
+    ['大会の下書き状態',t.status==='draft','大会状態がdraftではありません'],
+    ['保存処理の待機',!groupingPreview.busy,'現在保存処理中です'],
+    ['画面データ読み込み',!state.loading&&!state.error,state.error||(state.loading?'取得中':'' )],
+    ['スタッフ認証',!!state.auth&&!!state.staff,state.staffError||'ログイン・スタッフ状態を確認してください'],
+    ['大会管理者権限',canManageCategories()&&state.tournamentAdminIds.includes(t.id),state.tournamentAdminError||'大会管理者権限が確認できません'],
+    ['順位承認情報の取得',state.approvedLoaded&&!state.approvedError,state.approvedError||'未取得'],
+    ['決勝進出者情報の取得',state.qualificationLocksLoaded&&!state.qualificationLocksError,state.qualificationLocksError||'未取得'],
+    ['正式結果情報の取得',state.officialLoaded&&!state.officialError,state.officialError||'未取得'],
+    ['対戦表情報の取得',!state.bracketError,state.bracketError],
+    ['組数と人数の計算',!!selected&&active.length===sizeTotal,!selected?'有効な組数を選択できていません':`有効${active.length}ペア／組別合計${sizeTotal}ペア`],
+    ['既存の試合がない',existingMatches===0,`既存試合 ${existingMatches}件`],
+    ['承認済み順位がない',approved===0,`承認済み順位 ${approved}件`],
+    ['決勝進出者の確定がない',!locked,'進出者確定フラグがあります'],
+    ['正式結果の記録がない',official.length===0,`正式結果の記録 ${official.length}件（状態に関係なく保存不可）`],
+    ['決勝対戦枠がない',bracket.length===0,`決勝対戦枠 ${bracket.length}件`],
+    ['既存の組分けがない',savedAssignments===0,`組分け登録済み ${savedAssignments}ペア`]
   ];
-  const rows=statuses.map(([label,ok,detail])=>`<tr><td>${esc(label)}</td><td><b>${ok?'OK':'要確認'}</b></td><td style="white-space:normal;overflow-wrap:anywhere">${esc(ok?'—':detail||'状態が確認できません')}</td></tr>`).join('');
-  return `<details class="card" id="groupSaveDiagnostics"><summary><b>保存前チェックの診断結果（読み取り専用）</b></summary><p class="prompt">原因確認用です。権限制御・保存条件は変更しません。ログイン情報や個人情報は表示しません。</p><div class="tablebox"><table class="tbl"><thead><tr><th>確認項目</th><th>状態</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+  const rows=statuses.map(([label,ok,detail])=>`<tr><td>${esc(label)}</td><td><b>${ok?'OK':'要確認'}</b></td><td style="white-space:normal;overflow-wrap:anywhere">${esc(ok?'—':detail||'状態を確認してください')}</td></tr>`).join('');
+  const issues=statuses.filter(x=>!x[1]).length;
+  return `<details class="card" id="groupSaveDiagnostics" open><summary><b>保存前チェックの診断結果（読み取り専用）／要確認 ${issues}項目</b></summary><p class="prompt">保存条件の各判定を表示します。個人情報・ログイン情報は表示しません。権限制御・保存処理・DBは変更していません。</p><div class="tablebox"><table class="tbl"><thead><tr><th>確認項目</th><th>状態</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
 }
 
 function groupingPreviewSection(t,categories){
@@ -771,7 +791,7 @@ function groupingPreviewSection(t,categories){
     ${selected?`<p><b>${participants.length}ペア → ${selected.count}組</b>（${selected.sizes.join('・')}ペア／組）</p><div class="grid">${grid}</div>`:`<div class="notice">${demo?'人数構成を計算できません。':'現在の有効ペア数と最大組人数では組分け候補がありません。3ペア以上を登録するか、カテゴリーの募集枠設定を確認してください。'}</div>`}
     <button type="button" class="btn wide" id="savePreliminaryGroups" ${canSaveGroups?'':'disabled'}>${groupingPreview.busy?'確定処理中…':'予選組分けを確定して保存'}</button>
     ${!canSaveGroups?`<p class="prompt" role="status">保存できない理由：${esc(saveBlockReason)}</p>`:''}
-    ${!demo&&!canSaveGroups?groupSaveDiagnosticSection(t,cat):''}
+    ${!demo&&!canSaveGroups?groupSaveDiagnosticSection(t,cat,active,selected):''}
     ${groupingPreview.message?`<div class="${groupingPreview.success?'notice blue':'empty-error'}" role="status">${esc(groupingPreview.message)}</div>`:''}
     <p class="prompt">プレビューは再現性のある名前順の仮配置です。実際の抽選・シード・対戦重複回避は未実装です。保存操作を実行するまでは既存のgroup_nameは変更しません。</p></div>`;
 }
