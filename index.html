@@ -970,8 +970,8 @@ function realSchedulePreview(t){
 // No RPC, no write, and no automatic confirmation of a withdrawal.
 const withdrawalShiftPreviewState={pairId:'',reason:'',busy:false,message:'',ok:false};
 const WITHDRAWAL_CONFIRM_TEST_TOURNAMENT='9a3f5dc1-382b-43ec-9705-66510a3225d2';
-// STEP 250 safety preview: hard-disable the actual confirmation RPC.
-const WITHDRAWAL_DRY_RUN_ONLY=false; // TEST TOURNAMENT ONLY; all other tournaments blocked by withdrawalConfirmationAllowed
+// Explicit writes remain restricted to one test tournament by both UI and server RPC.
+const WITHDRAWAL_DRY_RUN_ONLY=false;
 function withdrawalShiftPlan(t,pairId){
  if(!t||!pairId)throw Error('大会とキャンセル候補を選択してください。');
  if(state.loading||state.error||state.courtLoadError)throw Error('最新の大会データを取得してください。');
@@ -1052,7 +1052,7 @@ function withdrawalConfirmationAllowed(t,plan){
  return !!client&&t?.id===WITHDRAWAL_CONFIRM_TEST_TOURNAMENT&&t.status==='draft'
   &&Number.isFinite(eventStart)&&now<eventStart
   &&!!state.auth&&state.staff&&state.tournamentAdminLoaded&&!state.tournamentAdminError
-  &&state.tournamentAdminIds.includes(t.id)&&!state.loading&&!state.error&&!state.courtLoadError
+  &&state.tournamentStaffIds.includes(t.id)&&!state.loading&&!state.error&&!state.courtLoadError
   &&!withdrawalShiftPreviewState.busy&&!!plan&&plan.remaining>0;
 }
 function withdrawalConfirmationAssignments(t,plan){
@@ -1097,8 +1097,8 @@ async function confirmWithdrawalSchedule(){
   const currentT=state.tournaments.find(x=>x.id===tid);
   const freshPlan=withdrawalShiftPlan(currentT,pairId);
   const freshAssignments=withdrawalConfirmationAssignments(currentT,freshPlan);
-  if(!(ui.busy&&currentT?.id===WITHDRAWAL_CONFIRM_TEST_TOURNAMENT&&currentT.status==='draft'&&state.auth&&state.staff&&state.tournamentAdminLoaded&&!state.tournamentAdminError&&state.tournamentAdminIds.includes(tid)&&!state.error&&!state.courtLoadError&&freshPlan.remaining>0&&state.tab==='ops_checkin'&&receptionView.withdrawalPairId===pairId))
-   throw Error('保存条件または管理者権限を再確認できませんでした。');
+  if(!(ui.busy&&currentT?.id===WITHDRAWAL_CONFIRM_TEST_TOURNAMENT&&currentT.status==='draft'&&state.auth&&state.staff&&state.tournamentAdminLoaded&&!state.tournamentAdminError&&state.tournamentStaffIds.includes(tid)&&!state.error&&!state.courtLoadError&&freshPlan.remaining>0&&state.tab==='ops_checkin'&&receptionView.withdrawalPairId===pairId))
+   throw Error('保存条件または大会スタッフ権限を再確認できませんでした。');
   if(freshAssignments.length!==expected.size||freshAssignments.some(a=>!expected.has(a.match_id)||expected.get(a.match_id).court_id!==a.court_id||new Date(expected.get(a.match_id).start_time).getTime()!==new Date(a.start_time).getTime()))
    throw Error('再計算した時間割が確認時と異なります。');
   const catIds=state.categories.filter(c=>c.tournament_id===tid).map(c=>c.id);
@@ -1114,7 +1114,7 @@ async function confirmWithdrawalSchedule(){
   if(pairError||dbPair?.participation_status!=='active')throw Error('キャンセル対象ペアの状態が変更されています。');
   if(ui.reason.trim()!==reason||ui.pairId!==pairId||withdrawalUiTournamentId()!==tid||receptionView.withdrawalPairId!==pairId)throw Error('確認後に入力内容が変わりました。');
   attempted=true;
-  const {data:saved,error:rpcError}=await client.rpc('admin_confirm_withdrawal_schedule',{
+  const {data:saved,error:rpcError}=await client.rpc('staff_confirm_withdrawal_schedule',{
    p_tournament_id:tid,p_pair_id:pairId,p_reason:reason,p_assignments:assignments,
    p_expected_current:withdrawalConfirmationSnapshot(dbBefore),
    p_reorganization_start:jstSnapshotTime(new Date(Math.min(...plan.cancelled.map(m=>new Date(m.start_time).getTime()))).toISOString())
@@ -1128,7 +1128,11 @@ async function confirmWithdrawalSchedule(){
   if(afterMatches.error||afterPair.error||afterPair.data?.participation_status!=='withdrawn'||afterMatches.data?.length!==dbBefore.length)
    throw Error('保存後のDB照合に失敗しました。');
   const cancelled=new Set(plan.cancelled.map(x=>x.id));
-  if(afterMatches.data.some(m=>cancelled.has(m.id)?!['walkover','cancelled'].includes(m.status)||m.court_id!=null||m.start_time!=null:!expected.has(m.id)||m.status!=='scheduled'||m.court_id!==expected.get(m.id).court_id||new Date(m.start_time).getTime()!==new Date(expected.get(m.id).start_time).getTime()))
+  if(afterMatches.data.some(m=>cancelled.has(m.id)
+    ?!['walkover','cancelled'].includes(m.status)||m.court_id!=null||m.start_time!=null
+    :expected.has(m.id)
+      ?m.status!=='scheduled'||m.court_id!==expected.get(m.id).court_id||new Date(m.start_time).getTime()!==new Date(expected.get(m.id).start_time).getTime()
+      :!dbBefore.some(old=>old.id===m.id&&old.status==='walkover'&&m.status==='walkover'&&old.court_id===m.court_id&&old.start_time===m.start_time)))
    throw Error('保存後の不戦勝・時間割がプレビューと異なります。');
   await loadData();
   if(state.error||state.pairs.find(p=>p.id===pairId)?.participation_status!=='withdrawn')throw Error('保存後の画面再取得に失敗しました。');
@@ -1217,10 +1221,7 @@ function withdrawalShiftSection(t){
   const blockedRows=r.blocked.slice(0,30).map(x=>`<tr><td>${esc(courtName(x.courtId))} ${esc(fmt(x.at))}</td><td>${esc(matchCode(x.match)||x.match.id.slice(0,8))}</td><td>${esc(x.issue)}</td></tr>`).join('');
   result=`<div class="metrics"><div class="metric"><small>不戦勝等の対象</small><strong>${r.cancelled.length}</strong></div><div class="metric"><small>残る予定試合</small><strong>${r.remaining}</strong></div><div class="metric"><small>繰り上げ候補</small><strong>${r.changes.length}</strong></div></div><h3>繰り上げ可能な候補</h3>${moveRows?`<div class="tablebox"><table class="tbl"><thead><tr><th>試合</th><th>コート</th><th>変更前</th><th>変更後</th></tr></thead><tbody>${moveRows}</tbody></table></div>`:'<p class="notice">今回の条件では、安全に繰り上げられる試合を見つけられませんでした。空き枠を維持します。</p>'}<details><summary>移動を見送った候補・理由（${r.blocked.length}件）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>空き枠</th><th>候補試合</th><th>理由</th></tr></thead><tbody>${blockedRows||'<tr><td colspan="3">なし</td></tr>'}</tbody></table></div></details>`;
  }catch(e){result=`<div class="notice">プレビューできません：${esc(e.message)}</div>`;}
-  if(!state.tournamentAdminIds.includes(t.id)){
-    return `<div class="card stack"><h3>欠場・キャンセルの影響確認（保存なし）</h3><div class="notice blue">担当スタッフ向けの事前確認画面です。スタッフ用の欠場確定RPCは安全検証中のため停止しています。ここではデータを保存しません。</div><p><b>対象ペア：</b>${esc(pairName(selected))}</p>${result}<p class="prompt">このプレビューは予定試合と既存の不戦勝だけを対象とし、試合中・終了済みがある場合は停止します。既存の不戦勝は変更しません。実際の欠場登録は行われません。</p></div>`;
-  }
-  return `<div class="card stack"><h3>当日開始前・1組キャンセルの繰り上げプレビュー</h3><div class="notice blue">テスト大会のみ実際のキャンセル確定を有効にしています。確定すると参加状態・不戦勝・残りの時間割がSupabaseに保存され、元に戻す操作はありません。誤操作に注意してください。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}${(()=>{let plan=null;try{plan=withdrawalShiftPlan(t,selected)}catch(_e){}const reasonValid=withdrawalShiftPreviewState.reason.trim().length>0&&withdrawalShiftPreviewState.reason.trim().length<=500;const enabled=withdrawalConfirmationAllowed(t,plan)&&reasonValid;return `<div class="line"></div><h3>キャンセルの確認（テスト大会限定）</h3><div class="notice">STEP 255：V10_TEST_一括登録（下書き・大会開始前）のみ実保存可能です。管理者限定。ボタンを押した後、最終確認でOKするとSupabaseのペア参加状態・不戦勝・時間割を一括更新します。他大会は保存不可です。</div><label for="withdrawalConfirmReason">キャンセル理由</label><textarea class="field" id="withdrawalConfirmReason" rows=2 maxlength=500>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmWithdrawalSchedule" ${enabled?'':'disabled'}>${withdrawalShiftPreviewState.busy?'保存処理中…':'【実際に保存】欠場・時間割変更を確定'}</button>${!reasonValid?'<p class="prompt" id="withdrawalReasonHint">キャンセル理由（1〜500文字）を入力すると、ほかの条件を満たす場合に確定できます。</p>':!enabled?'<p class="prompt" id="withdrawalReasonHint">対象テスト大会、下書き、開始前、管理者権限、完全なプレビューが必要です。</p>':''}${withdrawalShiftPreviewState.message?`<p class="${withdrawalShiftPreviewState.ok?'notice blue':'empty-error'}" role="status">${esc(withdrawalShiftPreviewState.message)}</p>`:''}`})()}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。この版ではテスト大会のみ実保存できます。公開済み大会への適用は別工程です。サーバー側で最終検証を行います。</p></div>`;
+  return `<div class="card stack"><h3>開始前・1組キャンセルの繰り上げプレビュー（テスト大会限定）</h3><div class="notice blue">管理者・一般スタッフともにテスト大会のみ実際のキャンセル確定を有効にしています。確定すると参加状態・不戦勝・残りの時間割がSupabaseに保存され、元に戻す操作はありません。誤操作に注意してください。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}${(()=>{let plan=null;try{plan=withdrawalShiftPlan(t,selected)}catch(_e){}const reasonValid=withdrawalShiftPreviewState.reason.trim().length>0&&withdrawalShiftPreviewState.reason.trim().length<=500;const enabled=withdrawalConfirmationAllowed(t,plan)&&reasonValid;return `<div class="line"></div><h3>キャンセルの確認（テスト大会限定）</h3><div class="notice">STEP 256：V10_TEST_一括登録（下書き・大会開始前）のみ実保存可能です。対象大会の管理者・スタッフ限定。ボタンを押した後、最終確認でOKするとSupabaseのペア参加状態・不戦勝・時間割を一括更新します。他大会は保存不可です。</div><label for="withdrawalConfirmReason">キャンセル理由</label><textarea class="field" id="withdrawalConfirmReason" rows=2 maxlength=500>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmWithdrawalSchedule" ${enabled?'':'disabled'}>${withdrawalShiftPreviewState.busy?'保存処理中…':'【実際に保存】欠場・時間割変更を確定'}</button>${!reasonValid?'<p class="prompt" id="withdrawalReasonHint">キャンセル理由（1〜500文字）を入力すると、ほかの条件を満たす場合に確定できます。</p>':!enabled?'<p class="prompt" id="withdrawalReasonHint">対象テスト大会、下書き、開始前、大会スタッフ権限、完全なプレビューが必要です。</p>':''}${withdrawalShiftPreviewState.message?`<p class="${withdrawalShiftPreviewState.ok?'notice blue':'empty-error'}" role="status">${esc(withdrawalShiftPreviewState.message)}</p>`:''}`})()}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。この版ではテスト大会のみ実保存できます。公開済み大会への適用は別工程です。サーバー側で最終検証を行います。</p></div>`;
 }
 
 // STEP 22-6-9-139: whole-tournament fair rescheduling of draft, unplayed games.
@@ -2137,7 +2138,7 @@ function permissionDiagnosticSection(){
  <button type="button" id="runPermissionDiagnostic" class="btn wide" ${permissionDiagnostic.busy?'disabled':''}>${permissionDiagnostic.busy?'診断中…':'権限を再確認する（保存なし）'}</button>
  ${permissionDiagnostic.message?`<p class="${permissionDiagnostic.checkedAt?'notice blue':'empty-error'}" role="status">${esc(permissionDiagnostic.message)}</p>`:''}
  ${table?`<div class="tablebox"><table class="tbl"><thead><tr><th>確認項目</th><th>結果</th></tr></thead><tbody>${table}</tbody></table></div>`:''}
- <p class="prompt">「管理者のみ」「スタッフ可」は設計上の期待権限です。この画面はRPCを実行して拒否を試すテストではないため、サーバー側のアクセス制御を証明するものではありません。スタッフ用欠場確定RPCは現在停止中です。</p></div>`;
+ <p class="prompt">「管理者のみ」「スタッフ可」は設計上の期待権限です。この画面はRPCを実行して拒否を試すテストではないため、サーバー側のアクセス制御を証明するものではありません。スタッフ用欠場確定RPCはテスト大会に限定して公開されています。画面は実行可否の診断をしません。</p></div>`;
 }
 async function runPermissionDiagnostic(){
  if(permissionDiagnostic.busy||!client||!state.auth)return;
@@ -2164,7 +2165,7 @@ async function runPermissionDiagnostic(){
    {tid,name:'受付登録',value:'スタッフ・管理者ともに可能（設計上）'},
    {tid,name:'受付取消',value:expectedAdmin?'管理者に許可（設計上）':'管理者のみ・この役割では不可（設計上）'},
    {tid,name:'通常の時間割再編成',value:expectedAdmin?'管理者に許可（設計上）':'管理者のみ・この役割では不可（設計上）'},
-   {tid,name:'スタッフ用欠場確定',value:'外部実行停止中（SQLで確認済み・この画面では再検証しません）'}
+   {tid,name:'スタッフ用欠場確定',value:'テスト大会限定で公開済み（SQLで確認済み・この画面では再検証しません）'}
   ];
   permissionDiagnostic.checkedAt=new Date().toLocaleString('ja-JP');
   permissionDiagnostic.message='認証と大会役割の読み取りに成功しました（'+permissionDiagnostic.checkedAt+'）。';
