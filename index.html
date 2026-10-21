@@ -465,9 +465,11 @@ function buildCategory(c,ci,scenario){
   qualifiers.push(...rotated.slice(0,advance));
  });
  // Provisional final matches, independent of the database bracket.
+ // One preliminary group has no final regardless of final format.
  const finalFormat=c.finalFormat||'knockout';
  if(!['knockout','round_robin'].includes(finalFormat))throw Error('invalid final format');
- const knockouts=[];let participants=qualifiers.slice(),round=1;
+ const knockouts=[];let participants=sizes.length===1?[]:qualifiers.slice(),round=1;
+ let semifinalLosers=[];
  if(finalFormat==='round_robin'){
   for(let i=0;i<participants.length;i++)for(let j=i+1;j<participants.length;j++)knockouts.push({id:`R-${ci}-${i}-${j}`,phase:'knockout',category:c.name,round:1,pairs:[participants[i],participants[j]]});
  }else if(participants.length>=2){
@@ -480,20 +482,27 @@ function buildCategory(c,ci,scenario){
    const pair=[roundOne[i],roundOne[i+1]];
    knockouts.push({id:`K-${ci}-${round}-${i/2}`,phase:'knockout',category:c.name,round,pairs:pair});
    next.push(pair[scenario%2]);
+   if(roundOne.length===4)semifinalLosers.push(pair[1-(scenario%2)]);
   }
   participants=next;round++;
   while(participants.length>1){
    const winners=[];
+   if(participants.length===4)semifinalLosers=[];
    for(let i=0;i<participants.length;i+=2){
     const pair=[participants[i],participants[i+1]];
     knockouts.push({id:`K-${ci}-${round}-${i/2}`,phase:'knockout',category:c.name,round,pairs:pair});
-    winners.push(pair[(scenario+round+i/2)%2]);
+    const winnerIndex=(scenario+round+i/2)%2;
+    winners.push(pair[winnerIndex]);
+    if(participants.length===4)semifinalLosers.push(pair[1-winnerIndex]);
    }
    participants=winners;round++;
   }
+  if(qualifiers.length>=4 && semifinalLosers.length===2){
+   knockouts.push({id:`T-${ci}`,phase:'knockout',category:c.name,round:round-1,pairs:semifinalLosers,thirdPlace:true});
+  }
  }
  const summary={category:c.name,pairs:c.pairs,groupMax:c.groupMax,groupSizes:sizes,qualifiers:qualifiers.length,finalFormat,preliminary:prelim.length,knockout:knockouts.length,total:prelim.length+knockouts.length};
- if(summary.preliminary!==sizes.reduce((s,x)=>s+choose2(x),0)||summary.knockout!==(finalFormat==='round_robin'?choose2(qualifiers.length):Math.max(0,qualifiers.length-1)))throw Error('count mismatch');
+ if(summary.preliminary!==sizes.reduce((s,x)=>s+choose2(x),0)||summary.knockout!==(sizes.length===1?0:finalFormat==='round_robin'?choose2(qualifiers.length):Math.max(0,qualifiers.length-1)+(qualifiers.length>=4?1:0)))throw Error('count mismatch');
  return {prelim,knockouts,summary};
 }
 function scheduleScenario(config,scenario=0){
