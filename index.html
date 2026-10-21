@@ -966,7 +966,7 @@ function realSchedulePreview(t){
   return {rows,pending,begin,deadline,courts,duration,total:all.length};
 }
 
-// STEP 246: read-only preview of one-pair withdrawal before any match begins.
+// STEP 256-76: read-only preview also supports previously recorded walkovers.
 // No RPC, no write, and no automatic confirmation of a withdrawal.
 const withdrawalShiftPreviewState={pairId:'',reason:'',busy:false,message:'',ok:false};
 const WITHDRAWAL_CONFIRM_TEST_TOURNAMENT='9a3f5dc1-382b-43ec-9705-66510a3225d2';
@@ -976,10 +976,13 @@ function withdrawalShiftPlan(t,pairId){
  if(!t||!pairId)throw Error('大会とキャンセル候補を選択してください。');
  if(state.loading||state.error||state.courtLoadError)throw Error('最新の大会データを取得してください。');
  const all=tournamentMatches(t.id);
- if(!all.length||all.some(m=>m.status!=='scheduled'||!m.start_time||!m.court_id||!m.pair_a_id||!m.pair_b_id))throw Error('開始前かつ全試合が時刻・コート割当済みの場合だけ試算できます。');
+ // Previously resolved walkovers are preserved; only scheduled matches are eligible.
+ if(!all.length||all.some(m=>!['scheduled','walkover'].includes(m.status)))throw Error('予定試合と既存の不戦勝のみ対応しています。試合中・終了済みの試合を含む場合は処理を停止します。');
+ const scheduled=all.filter(m=>m.status==='scheduled');
+ if(!scheduled.length||scheduled.some(m=>!m.start_time||!m.court_id||!m.pair_a_id||!m.pair_b_id))throw Error('残る予定試合の時刻・コート・対戦相手を確認してください。');
  const pair=state.pairs.find(p=>p.id===pairId&&p.participation_status==='active'&&state.categories.some(c=>c.id===p.category_id&&c.tournament_id===t.id));
  if(!pair)throw Error('有効な参加ペアを確認できません。');
- const cancelled=all.filter(m=>m.pair_a_id===pairId||m.pair_b_id===pairId);
+ const cancelled=scheduled.filter(m=>m.pair_a_id===pairId||m.pair_b_id===pairId);
  if(!cancelled.length)throw Error('このペアの予定試合がありません。');
  const duration=Number(t.match_minutes),rest=Number(t.minimum_rest_minutes),limit=Number(t.max_consecutive_matches);
  if(!Number.isInteger(duration)||duration<1||!Number.isInteger(rest)||rest<0||!Number.isInteger(limit)||limit<1)throw Error('試合時間・休憩・連戦条件が不正です。');
@@ -988,7 +991,7 @@ function withdrawalShiftPlan(t,pairId){
  const pairs=new Map(state.pairs.map(p=>[p.id,p]));
  const normalize=n=>String(n??'').replace(/[\s\u3000]+/g,'').toLocaleLowerCase();
  const people=m=>[m.pair_a_id,m.pair_b_id].flatMap(id=>{const p=pairs.get(id);if(!p||p.category_id!==m.category_id||p.participation_status!=='active')throw Error('残る試合に参加資格のないペアがあります。');return [normalize(p.player1),normalize(p.player2)];});
- const retained=all.filter(m=>!cancelled.includes(m)).map(m=>({m,at:new Date(m.start_time).getTime(),persons:people(m)}));
+ const retained=scheduled.filter(m=>!cancelled.includes(m)).map(m=>({m,at:new Date(m.start_time).getTime(),persons:people(m)}));
  if(retained.some(x=>x.persons.some(v=>!v)||new Set(x.persons).size!==4||!courtIds.has(x.m.court_id)))throw Error('選手名または公式コートに不整合があります。');
  const shiftMs=duration*60000,restMs=rest*60000;
  const base=parseWindowMinute(String(t.start_time||'').slice(0,5));
@@ -1055,7 +1058,7 @@ function withdrawalConfirmationAllowed(t,plan){
 function withdrawalConfirmationAssignments(t,plan){
  const changes=new Map(plan.changes.map(x=>[x.m.id,x]));
  const all=tournamentMatches(t.id),excluded=new Set(plan.cancelled.map(m=>m.id));
- const result=all.filter(m=>!excluded.has(m.id)).map(m=>{
+ const result=all.filter(m=>m.status==='scheduled'&&!excluded.has(m.id)).map(m=>{
   const move=changes.get(m.id);
   return {match_id:m.id,court_id:m.court_id,
    start_time:move?jstSnapshotTime(new Date(move.newAt).toISOString()):jstSnapshotTime(m.start_time)};
@@ -1215,7 +1218,7 @@ function withdrawalShiftSection(t){
   result=`<div class="metrics"><div class="metric"><small>不戦勝等の対象</small><strong>${r.cancelled.length}</strong></div><div class="metric"><small>残る予定試合</small><strong>${r.remaining}</strong></div><div class="metric"><small>繰り上げ候補</small><strong>${r.changes.length}</strong></div></div><h3>繰り上げ可能な候補</h3>${moveRows?`<div class="tablebox"><table class="tbl"><thead><tr><th>試合</th><th>コート</th><th>変更前</th><th>変更後</th></tr></thead><tbody>${moveRows}</tbody></table></div>`:'<p class="notice">今回の条件では、安全に繰り上げられる試合を見つけられませんでした。空き枠を維持します。</p>'}<details><summary>移動を見送った候補・理由（${r.blocked.length}件）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>空き枠</th><th>候補試合</th><th>理由</th></tr></thead><tbody>${blockedRows||'<tr><td colspan="3">なし</td></tr>'}</tbody></table></div></details>`;
  }catch(e){result=`<div class="notice">プレビューできません：${esc(e.message)}</div>`;}
   if(!state.tournamentAdminIds.includes(t.id)){
-    return `<div class="card stack"><h3>欠場・キャンセルの影響確認（保存なし）</h3><div class="notice blue">担当スタッフ向けの事前確認画面です。スタッフ用の欠場確定RPCは安全検証中のため停止しています。ここではデータを保存しません。</div><p><b>対象ペア：</b>${esc(pairName(selected))}</p>${result}<p class="prompt">このプレビューは開始前かつ全試合が予定状態の場合だけ計算できます。実際の欠場登録は行われません。</p></div>`;
+    return `<div class="card stack"><h3>欠場・キャンセルの影響確認（保存なし）</h3><div class="notice blue">担当スタッフ向けの事前確認画面です。スタッフ用の欠場確定RPCは安全検証中のため停止しています。ここではデータを保存しません。</div><p><b>対象ペア：</b>${esc(pairName(selected))}</p>${result}<p class="prompt">このプレビューは予定試合と既存の不戦勝だけを対象とし、試合中・終了済みがある場合は停止します。既存の不戦勝は変更しません。実際の欠場登録は行われません。</p></div>`;
   }
   return `<div class="card stack"><h3>当日開始前・1組キャンセルの繰り上げプレビュー</h3><div class="notice blue">テスト大会のみ実際のキャンセル確定を有効にしています。確定すると参加状態・不戦勝・残りの時間割がSupabaseに保存され、元に戻す操作はありません。誤操作に注意してください。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}${(()=>{let plan=null;try{plan=withdrawalShiftPlan(t,selected)}catch(_e){}const reasonValid=withdrawalShiftPreviewState.reason.trim().length>0&&withdrawalShiftPreviewState.reason.trim().length<=500;const enabled=withdrawalConfirmationAllowed(t,plan)&&reasonValid;return `<div class="line"></div><h3>キャンセルの確認（テスト大会限定）</h3><div class="notice">STEP 255：V10_TEST_一括登録（下書き・大会開始前）のみ実保存可能です。管理者限定。ボタンを押した後、最終確認でOKするとSupabaseのペア参加状態・不戦勝・時間割を一括更新します。他大会は保存不可です。</div><label for="withdrawalConfirmReason">キャンセル理由</label><textarea class="field" id="withdrawalConfirmReason" rows=2 maxlength=500>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmWithdrawalSchedule" ${enabled?'':'disabled'}>${withdrawalShiftPreviewState.busy?'保存処理中…':'【実際に保存】欠場・時間割変更を確定'}</button>${!reasonValid?'<p class="prompt" id="withdrawalReasonHint">キャンセル理由（1〜500文字）を入力すると、ほかの条件を満たす場合に確定できます。</p>':!enabled?'<p class="prompt" id="withdrawalReasonHint">対象テスト大会、下書き、開始前、管理者権限、完全なプレビューが必要です。</p>':''}${withdrawalShiftPreviewState.message?`<p class="${withdrawalShiftPreviewState.ok?'notice blue':'empty-error'}" role="status">${esc(withdrawalShiftPreviewState.message)}</p>`:''}`})()}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。この版ではテスト大会のみ実保存できます。公開済み大会への適用は別工程です。サーバー側で最終検証を行います。</p></div>`;
 }
