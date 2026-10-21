@@ -65,7 +65,7 @@ const OPS_TABS=[['home','進行状況'],['ops_checkin','受付'],['matches','試
 const PUBLIC_TABS=[['public_home','大会概要'],['public_matches','試合予定・結果'],['public_rankings','順位・決勝']];
 const TABS=[...OPS_TABS,['manage','大会準備']];
 const matchListFilter={query:'',pendingOnly:false};
-const state={matchNumbers:{},matchNumberError:'',tab:'public_home',loading:false,error:'',auth:null,staff:false,staffError:'',systemAdmin:false,systemAdminLoaded:false,systemAdminError:'',tournamentAdminIds:[],tournamentAdminLoaded:false,tournamentAdminError:'',tournaments:[],categories:[],stages:[],pairs:[],matches:[],courts:[],category:'all',tournament:'all',pair:'',group:'',rankings:[],approved:[],rankingError:'',bracketError:'',bracketSlots:[],officialResults:[],officialError:"",officialLoaded:false,rankingRows:{},rankingLoadErrors:{},rankingLoading:false,approvedLoaded:false,approvedError:'',qualificationLocks:[],qualificationLocksLoaded:false,qualificationLocksError:'',courtLoadError:'',lastLoaded:null};
+const state={matchNumbers:{},matchNumberError:'',tab:'public_home',loading:false,error:'',auth:null,staff:false,staffError:'',systemAdmin:false,systemAdminLoaded:false,systemAdminError:'',tournamentAdminIds:[],tournamentStaffIds:[],tournamentAdminLoaded:false,tournamentAdminError:'',tournaments:[],categories:[],stages:[],pairs:[],matches:[],courts:[],category:'all',tournament:'all',pair:'',group:'',rankings:[],approved:[],rankingError:'',bracketError:'',bracketSlots:[],officialResults:[],officialError:"",officialLoaded:false,rankingRows:{},rankingLoadErrors:{},rankingLoading:false,approvedLoaded:false,approvedError:'',qualificationLocks:[],qualificationLocksLoaded:false,qualificationLocksError:'',courtLoadError:'',lastLoaded:null};
 const categoryForm={tournamentId:'9809c9a9-aec9-44fb-bcfc-e186e69cef51',selectedLevels:[1],division:'フリー',displayOrder:0};
 const CATEGORY_LEVELS=['初心者','初級','初中級','中級','中上級','上級'];
 const CATEGORY_DIVISIONS=['男性','女性','ミックス','フリー'];
@@ -550,6 +550,7 @@ return {simulate,buildCategoryPreview:buildCategory};
 
 })();
 
+const isAssignedTournamentStaff=tid=>!!state.auth&&state.staff&&state.tournamentAdminLoaded&&!state.tournamentAdminError&&state.tournamentStaffIds.includes(tid);
 const canManageCategories=()=>!!state.auth&&state.staff&&state.tournamentAdminLoaded&&!state.tournamentAdminError&&state.tournamentAdminIds.length>0;
 const canOpenManage=()=>!!state.auth&&((state.systemAdminLoaded&&state.systemAdmin&&!state.systemAdminError)||canManageCategories());
 let client=null;
@@ -1213,7 +1214,10 @@ function withdrawalShiftSection(t){
   const blockedRows=r.blocked.slice(0,30).map(x=>`<tr><td>${esc(courtName(x.courtId))} ${esc(fmt(x.at))}</td><td>${esc(matchCode(x.match)||x.match.id.slice(0,8))}</td><td>${esc(x.issue)}</td></tr>`).join('');
   result=`<div class="metrics"><div class="metric"><small>不戦勝等の対象</small><strong>${r.cancelled.length}</strong></div><div class="metric"><small>残る予定試合</small><strong>${r.remaining}</strong></div><div class="metric"><small>繰り上げ候補</small><strong>${r.changes.length}</strong></div></div><h3>繰り上げ可能な候補</h3>${moveRows?`<div class="tablebox"><table class="tbl"><thead><tr><th>試合</th><th>コート</th><th>変更前</th><th>変更後</th></tr></thead><tbody>${moveRows}</tbody></table></div>`:'<p class="notice">今回の条件では、安全に繰り上げられる試合を見つけられませんでした。空き枠を維持します。</p>'}<details><summary>移動を見送った候補・理由（${r.blocked.length}件）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>空き枠</th><th>候補試合</th><th>理由</th></tr></thead><tbody>${blockedRows||'<tr><td colspan="3">なし</td></tr>'}</tbody></table></div></details>`;
  }catch(e){result=`<div class="notice">プレビューできません：${esc(e.message)}</div>`;}
- return `<div class="card stack"><h3>当日開始前・1組キャンセルの繰り上げプレビュー</h3><div class="notice blue">テスト大会のみ実際のキャンセル確定を有効にしています。確定すると参加状態・不戦勝・残りの時間割がSupabaseに保存され、元に戻す操作はありません。誤操作に注意してください。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}${(()=>{let plan=null;try{plan=withdrawalShiftPlan(t,selected)}catch(_e){}const reasonValid=withdrawalShiftPreviewState.reason.trim().length>0&&withdrawalShiftPreviewState.reason.trim().length<=500;const enabled=withdrawalConfirmationAllowed(t,plan)&&reasonValid;return `<div class="line"></div><h3>キャンセルの確認（テスト大会限定）</h3><div class="notice">STEP 255：V10_TEST_一括登録（下書き・大会開始前）のみ実保存可能です。管理者限定。ボタンを押した後、最終確認でOKするとSupabaseのペア参加状態・不戦勝・時間割を一括更新します。他大会は保存不可です。</div><label for="withdrawalConfirmReason">キャンセル理由</label><textarea class="field" id="withdrawalConfirmReason" rows=2 maxlength=500>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmWithdrawalSchedule" ${enabled?'':'disabled'}>${withdrawalShiftPreviewState.busy?'保存処理中…':'【実際に保存】欠場・時間割変更を確定'}</button>${!reasonValid?'<p class="prompt" id="withdrawalReasonHint">キャンセル理由（1〜500文字）を入力すると、ほかの条件を満たす場合に確定できます。</p>':!enabled?'<p class="prompt" id="withdrawalReasonHint">対象テスト大会、下書き、開始前、管理者権限、完全なプレビューが必要です。</p>':''}${withdrawalShiftPreviewState.message?`<p class="${withdrawalShiftPreviewState.ok?'notice blue':'empty-error'}" role="status">${esc(withdrawalShiftPreviewState.message)}</p>`:''}`})()}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。この版ではテスト大会のみ実保存できます。公開済み大会への適用は別工程です。サーバー側で最終検証を行います。</p></div>`;
+  if(!state.tournamentAdminIds.includes(t.id)){
+    return `<div class="card stack"><h3>欠場・キャンセルの影響確認（保存なし）</h3><div class="notice blue">担当スタッフ向けの事前確認画面です。スタッフ用の欠場確定RPCは安全検証中のため停止しています。ここではデータを保存しません。</div><p><b>対象ペア：</b>${esc(pairName(selected))}</p>${result}<p class="prompt">このプレビューは開始前かつ全試合が予定状態の場合だけ計算できます。実際の欠場登録は行われません。</p></div>`;
+  }
+  return `<div class="card stack"><h3>当日開始前・1組キャンセルの繰り上げプレビュー</h3><div class="notice blue">テスト大会のみ実際のキャンセル確定を有効にしています。確定すると参加状態・不戦勝・残りの時間割がSupabaseに保存され、元に戻す操作はありません。誤操作に注意してください。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}${(()=>{let plan=null;try{plan=withdrawalShiftPlan(t,selected)}catch(_e){}const reasonValid=withdrawalShiftPreviewState.reason.trim().length>0&&withdrawalShiftPreviewState.reason.trim().length<=500;const enabled=withdrawalConfirmationAllowed(t,plan)&&reasonValid;return `<div class="line"></div><h3>キャンセルの確認（テスト大会限定）</h3><div class="notice">STEP 255：V10_TEST_一括登録（下書き・大会開始前）のみ実保存可能です。管理者限定。ボタンを押した後、最終確認でOKするとSupabaseのペア参加状態・不戦勝・時間割を一括更新します。他大会は保存不可です。</div><label for="withdrawalConfirmReason">キャンセル理由</label><textarea class="field" id="withdrawalConfirmReason" rows=2 maxlength=500>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmWithdrawalSchedule" ${enabled?'':'disabled'}>${withdrawalShiftPreviewState.busy?'保存処理中…':'【実際に保存】欠場・時間割変更を確定'}</button>${!reasonValid?'<p class="prompt" id="withdrawalReasonHint">キャンセル理由（1〜500文字）を入力すると、ほかの条件を満たす場合に確定できます。</p>':!enabled?'<p class="prompt" id="withdrawalReasonHint">対象テスト大会、下書き、開始前、管理者権限、完全なプレビューが必要です。</p>':''}${withdrawalShiftPreviewState.message?`<p class="${withdrawalShiftPreviewState.ok?'notice blue':'empty-error'}" role="status">${esc(withdrawalShiftPreviewState.message)}</p>`:''}`})()}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。この版ではテスト大会のみ実保存できます。公開済み大会への適用は別工程です。サーバー側で最終検証を行います。</p></div>`;
 }
 
 // STEP 22-6-9-139: whole-tournament fair rescheduling of draft, unplayed games.
@@ -2106,7 +2110,7 @@ function withdrawalUiTournamentId(){
 function openReceptionWithdrawal(pairId){
  const pair=state.pairs.find(p=>p.id===pairId);
  const cat=state.categories.find(c=>c.id===pair?.category_id);
- if(!pair||pair.participation_status!=='active'||cat?.tournament_id!==receptionView.tournamentId||!state.tournamentAdminIds.includes(receptionView.tournamentId))return;
+ if(!pair||pair.participation_status!=='active'||cat?.tournament_id!==receptionView.tournamentId||!isAssignedTournamentStaff(receptionView.tournamentId))return;
  receptionView.withdrawalPairId=pairId;
  withdrawalShiftPreviewState.pairId=pairId;
  withdrawalShiftPreviewState.reason='';
@@ -2117,7 +2121,7 @@ function openReceptionWithdrawal(pairId){
  if(panel)panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function receptionSection(){
- const eligible=state.tournaments.filter(t=>state.tournamentAdminIds.includes(t.id)||state.staff);
+ const eligible=state.tournaments.filter(t=>isAssignedTournamentStaff(t.id));
  if(!eligible.length)return '<h2>受付</h2><div class="notice">閲覧できる大会がありません。</div>';
  if(!eligible.some(t=>t.id===receptionView.tournamentId))receptionView.tournamentId=eligible.find(t=>t.id===categoryForm.tournamentId)?.id||eligible[0].id;
  const t=eligible.find(t=>t.id===receptionView.tournamentId);
@@ -2134,13 +2138,13 @@ function receptionSection(){
  const checked=all.filter(p=>receptionView.checkins.has(p.id)).length;
  const allowedWrite=receptionView.loaded&&!receptionView.error&&!receptionView.busyId&&!state.loading&&['draft','published','in_progress'].includes(t.status);
  const statusText={active:'参加中',withdrawn:'欠場',disqualified:'失格'};
- const rows=matches.map(p=>`<tr><td>${esc(cats.get(p.category_id)?.name)}</td><td>${esc(p.group_name?p.group_name+'組':'—')}</td><td><b>${esc(p.display_name)}</b></td><td><span class="status ${p.participation_status==='active'?'done':'pending'}">${esc(statusText[p.participation_status]||p.participation_status||'未設定')}</span></td><td><span class="status ${receptionView.loaded&&receptionView.checkins.has(p.id)?'done':'pending'}">${!receptionView.loaded?'取得待ち':receptionView.checkins.has(p.id)?'受付済み':'未受付'}</span></td><td><button type="button" class="btn secondary mini-btn" data-reception-action="${esc(p.id)}" data-reception-undo="${receptionView.checkins.has(p.id)?'1':'0'}" ${allowedWrite&&p.participation_status==='active'&&(!receptionView.checkins.has(p.id)||state.tournamentAdminIds.includes(t.id))?'':'disabled'}>${receptionView.checkins.has(p.id)?'受付取消（管理者）':'受付済みにする'}</button>${p.participation_status==='active'&&state.tournamentAdminIds.includes(t.id)?` <button type="button" class="btn secondary mini-btn" data-reception-withdrawal="${esc(p.id)}">欠場・キャンセル</button>`:''}</td></tr>`).join('');
- return `<h2>受付・参加ペア一覧</h2><div class="notice blue">Supabaseの登録ペアを表示しています。選手名・ペア名から検索できます。受付状態はSupabaseの専用テーブルに保存します。受付登録はスタッフ、受付取消は大会管理者のみ実行できます。欠場・キャンセルは管理者が対象ペアを選択して影響を確認します。現在は保存しないテスト版です。</div>
+ const rows=matches.map(p=>`<tr><td>${esc(cats.get(p.category_id)?.name)}</td><td>${esc(p.group_name?p.group_name+'組':'—')}</td><td><b>${esc(p.display_name)}</b></td><td><span class="status ${p.participation_status==='active'?'done':'pending'}">${esc(statusText[p.participation_status]||p.participation_status||'未設定')}</span></td><td><span class="status ${receptionView.loaded&&receptionView.checkins.has(p.id)?'done':'pending'}">${!receptionView.loaded?'取得待ち':receptionView.checkins.has(p.id)?'受付済み':'未受付'}</span></td><td><button type="button" class="btn secondary mini-btn" data-reception-action="${esc(p.id)}" data-reception-undo="${receptionView.checkins.has(p.id)?'1':'0'}" ${allowedWrite&&p.participation_status==='active'&&(!receptionView.checkins.has(p.id)||state.tournamentAdminIds.includes(t.id))?'':'disabled'}>${receptionView.checkins.has(p.id)?'受付取消（管理者）':'受付済みにする'}</button>${p.participation_status==='active'&&isAssignedTournamentStaff(t.id)?` <button type="button" class="btn secondary mini-btn" data-reception-withdrawal="${esc(p.id)}">欠場・キャンセル${state.tournamentAdminIds.includes(t.id)?'':'（確認のみ）'}</button>`:''}</td></tr>`).join('');
+ return `<h2>受付・参加ペア一覧</h2><div class="notice blue">Supabaseの登録ペアを表示しています。選手名・ペア名から検索できます。受付状態はSupabaseの専用テーブルに保存します。受付登録はスタッフ、受付取消は大会管理者のみ実行できます。欠場・キャンセルは担当スタッフも影響を確認できます。スタッフの欠場確定は安全確認中のため停止しています。管理者はテスト大会のみに限って確定できます。</div>
  <div class="card stack"><div><label for="receptionTournament">対象大会</label><select class="field" id="receptionTournament">${eligible.map(x=>opt(x.id,x.name,t.id)).join('')}</select></div>
  <div class="grid"><div><label for="receptionSearch">ペア名・選手名・カテゴリーで検索</label><input class="field" id="receptionSearch" type="search" placeholder="名前を入力" value="${esc(receptionView.query)}"></div><div><label for="receptionStatus">参加状態</label><select class="field" id="receptionStatus">${opt('all','すべて',receptionView.status)}${opt('active','参加中',receptionView.status)}${opt('inactive','欠場・その他',receptionView.status)}</select></div></div>
  <div class="metrics"><div class="metric"><small>登録ペア</small><strong>${all.length}</strong></div><div class="metric"><small>参加中</small><strong>${active}</strong></div><div class="metric"><small>受付済み</small><strong>${receptionView.loaded?checked:'—'}</strong></div></div>
  <p class="prompt" id="receptionCount">表示：${matches.length} / ${all.length}ペア</p><div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>組</th><th>ペア・選手</th><th>参加状態</th><th>受付状態</th><th>操作</th></tr></thead><tbody id="receptionRows">${rows||'<tr><td colspan="6">該当ペアがありません。</td></tr>'}</tbody></table></div>
- ${receptionView.error?`<div class="empty-error" role="alert">${esc(receptionView.error)}</div>`:''}${receptionView.message?`<div class="notice blue" role="status">${esc(receptionView.message)}</div>`:''}<div class="notice">受付登録・取消では試合と時間割は変更しません。ただし、テスト大会での欠場確定は実際にDBを更新するため、内容を十分確認してください。</div></div>${receptionView.withdrawalPairId&&state.tournamentAdminIds.includes(t.id)&&all.some(p=>p.id===receptionView.withdrawalPairId&&p.participation_status==='active')?`<section id="receptionWithdrawalPanel"><h2>欠場・キャンセルの事前確認</h2>${withdrawalShiftSection(t)}<button type="button" class="btn secondary wide" id="closeReceptionWithdrawal">閉じる</button></section>`:''}`;
+ ${receptionView.error?`<div class="empty-error" role="alert">${esc(receptionView.error)}</div>`:''}${receptionView.message?`<div class="notice blue" role="status">${esc(receptionView.message)}</div>`:''}<div class="notice">受付登録・取消では試合と時間割は変更しません。ただし、テスト大会での欠場確定は実際にDBを更新するため、内容を十分確認してください。</div></div>${receptionView.withdrawalPairId&&isAssignedTournamentStaff(t.id)&&all.some(p=>p.id===receptionView.withdrawalPairId&&p.participation_status==='active')?`<section id="receptionWithdrawalPanel"><h2>欠場・キャンセルの事前確認</h2>${withdrawalShiftSection(t)}<button type="button" class="btn secondary wide" id="closeReceptionWithdrawal">閉じる</button></section>`:''}`;
 }
 // STEP 22-5: operations workflow. Unimplemented actions remain disabled/non-actionable.
 function operationsPlaceholder(kind){
@@ -2193,24 +2197,25 @@ function loginModal(){modal(`<div class="row"><h2 style="margin:0">スタッフ�
 async function refreshAuth(){
  if(!client)return;
  const {data,error}=await client.auth.getUser();const user=error?null:data.user||null;
- matchNumberLoadVersion++;state.matchNumbers={};state.matchNumberError='';state.auth=user;state.staff=false;state.staffError='';state.systemAdmin=false;state.systemAdminLoaded=false;state.systemAdminError='';state.tournamentAdminIds=[];state.tournamentAdminLoaded=false;state.tournamentAdminError='';
+ matchNumberLoadVersion++;state.matchNumbers={};state.matchNumberError='';state.auth=user;state.staff=false;state.staffError='';state.systemAdmin=false;state.systemAdminLoaded=false;state.systemAdminError='';state.tournamentAdminIds=[];state.tournamentStaffIds=[];state.tournamentAdminLoaded=false;state.tournamentAdminError='';
  if(user){
   const [roleResult,adminResult,staffResult]=await Promise.all([
    client.from('staff_users').select('user_id').eq('user_id',user.id).eq('is_active',true).maybeSingle(),
    client.rpc('get_my_system_admin_status'),
-   client.from('tournament_staff').select('tournament_id,role').eq('user_id',user.id).eq('role','admin')
+   client.from('tournament_staff').select('tournament_id,role').eq('user_id',user.id)
   ]);
   if(state.auth?.id!==user.id)return;
   state.staff=!roleResult.error&&!!roleResult.data;state.staffError=roleResult.error?.message||'';
   state.systemAdmin=!adminResult.error&&adminResult.data===true;state.systemAdminLoaded=!adminResult.error;state.systemAdminError=adminResult.error?.message||'';
   state.tournamentAdminError=staffResult.error?.message||'';
   state.tournamentAdminLoaded=!staffResult.error;
-  state.tournamentAdminIds=state.staff&&!staffResult.error?(staffResult.data||[]).map(x=>x.tournament_id):[];
+  state.tournamentAdminIds=state.staff&&!staffResult.error?(staffResult.data||[]).filter(x=>x.role==='admin').map(x=>x.tournament_id):[];
+  state.tournamentStaffIds=state.staff&&!staffResult.error?(staffResult.data||[]).filter(x=>['admin','staff'].includes(x.role)).map(x=>x.tournament_id):[];
  }
  if(!state.staff&&areaOf(state.tab)==='ops')state.tab='public_home';if(state.tab==='manage'&&!canOpenManage())state.tab='public_home';
  state.qualificationLocksLoaded=false;state.qualificationLocks=[];render();if(!state.loading)await refreshMatchNumbers();
 }
-async function signOut(){if(!client)return;let {error}=await client.auth.signOut();if(error){alert(error.message);return}matchNumberLoadVersion++;state.matchNumbers={};state.matchNumberError='';state.auth=null;state.staff=false;state.systemAdmin=false;state.systemAdminLoaded=false;state.systemAdminError='';state.tournamentAdminIds=[];state.tournamentAdminLoaded=false;state.tournamentAdminError='';state.tab='public_home';render();await loadData()}
+async function signOut(){if(!client)return;let {error}=await client.auth.signOut();if(error){alert(error.message);return}matchNumberLoadVersion++;state.matchNumbers={};state.matchNumberError='';state.auth=null;state.staff=false;state.systemAdmin=false;state.systemAdminLoaded=false;state.systemAdminError='';state.tournamentAdminIds=[];state.tournamentStaffIds=[];state.tournamentAdminLoaded=false;state.tournamentAdminError='';state.tab='public_home';render();await loadData()}
 async function confirmOfficial(categoryId){
  if(!state.staff||officialLocked(categoryId))return;
  if(!confirm('このカテゴリーの優勝・準優勝を正式確定しますか？\n確定後はスコア・対戦枠を編集できなくなります。'))return;
