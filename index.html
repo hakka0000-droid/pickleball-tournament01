@@ -1883,7 +1883,79 @@ function ranking(){
   const rowsDisplay=[...rows].sort((a,b)=>(approvedMap.get(a.pair_id)??Number(a.rank))-(approvedMap.get(b.pair_id)??Number(b.rank))||Number(a.rank)-Number(b.rank)||pairName(a.pair_id).localeCompare(pairName(b.pair_id)));
   const actions=!state.staff||loading||err?'':approved.length?`<button class="btn secondary mini-btn" data-ranking-revoke="${esc(g.key)}" ${qualified||!lockKnown?'disabled':''}>承認を取り消す</button>`:tied?`<button class="btn mini-btn" data-ranking-resolve="${esc(g.key)}" ${ready?'':'disabled'}>同順位を手動解決（管理者）</button>`:`<button class="btn mini-btn" data-ranking-approve="${esc(g.key)}" ${ready?'':'disabled'}>順位を正式承認</button>`;
   return `<section class="card"><div class="row"><h3>${esc(g.group)}組</h3><span class="status ${approved.length?'done':complete?'pending':''}">${esc(status)}</span></div>${err?`<div class="empty-error">順位取得エラー：${esc(err)}</div>`:loading?'<p class="prompt">読み込み中…</p>':`<div class="tablebox"><table class="tbl"><thead><tr><th>順位</th><th>ペア</th><th>勝</th><th>負</th><th>得失点</th><th>総得点</th><th>試合</th></tr></thead><tbody>${rowsDisplay.map(r=>`<tr><td><b>${esc(approvedMap.get(r.pair_id)??r.rank)}位</b>${!approved.length&&rows.filter(x=>Number(x.rank)===Number(r.rank)).length>1?' <span class="status pending">同順位</span>':''}</td><td>${esc(r.pair_name||pairName(r.pair_id))}</td><td>${Number(r.wins)}</td><td>${Number(r.losses)}</td><td>${Number(r.point_difference)}</td><td>${Number(r.points_scored)}</td><td>${Number(r.played)}</td></tr>`).join('')||'<tr><td colspan="7">順位データがありません</td></tr>'}</tbody></table></div>`}<div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="prompt">${g.games.filter(m=>isDone(m)||isWalkover(m)).length}/${g.games.length}試合終了${qualified?' ／ 決勝進出者確定済み':''}</span>${actions}</div>${approved.length&&(qualified||!lockKnown)?`<p class="prompt">${qualified?'決勝進出者が確定済みのため、順位承認を取り消せません。':'決勝進出者の確定状態を確認できないため、承認取消を停止しています。'+esc(state.qualificationLocksError)}</p>`:''}</section>`;
- }).join('')}`).join('')||'<div class="empty">予選のグループ別試合はまだありません。</div>'}`;
+ }).join('')}${state.staff?qualifierPanel(cat):''}`).join('')||'<div class="empty">予選のグループ別試合はまだありません。</div>'}`;
+}
+// Simplified v10: confirm existing knockout qualifiers without changing SQL functions.
+const qualifierUi={busy:false,categoryId:'',message:'',ok:false};
+function qualifierPanel(categoryId){
+ const stages=state.stages.filter(s=>s.category_id===categoryId&&s.stage_type==='knockout');
+ const tournamentId=state.categories.find(c=>c.id===categoryId)?.tournament_id;
+ const tournament=state.tournaments.find(t=>t.id===tournamentId);
+ const approvedGroups=[...new Set(state.pairs.filter(p=>p.category_id===categoryId&&p.participation_status==='active'&&p.group_name).map(p=>p.group_name))];
+ const approvedReady=approvedGroups.length>0&&approvedGroups.every(g=>{
+  const active=state.pairs.filter(p=>p.category_id===categoryId&&p.participation_status==='active'&&p.group_name===g);
+  const ranks=state.approved.filter(a=>a.category_id===categoryId&&a.group_name===g&&active.some(p=>p.id===a.pair_id));
+  return active.length===ranks.length&&new Set(ranks.map(r=>r.rank)).size===ranks.length;
+ });
+ const locked=state.qualificationLocks.includes(categoryId);
+ const ready=!!client&&state.staff&&isAssignedTournamentStaff(tournamentId)&&!!tournament&&['published','in_progress'].includes(tournament.status)&&stages.length===1&&approvedReady&&!locked&&state.approvedLoaded&&!state.approvedError&&state.qualificationLocksLoaded&&!state.qualificationLocksError&&!state.rankingLoading&&!state.loading&&!state.error&&!qualifierUi.busy;
+ const settings=stages[0]?.settings?.qualification||{};
+ const top=Number(settings.top_n_per_group),wild=Number(settings.wildcard_count);
+ const expected=Number.isInteger(top)&&top>=1&&Number.isInteger(wild)&&wild>=0?approvedGroups.length*top+wild:null;
+ const reason=stages.length!==1?'決勝ステージが1件登録されている必要があります。':!approvedReady?'各組の有効ペア全員の順位承認が必要です。':!state.qualificationLocksLoaded||state.qualificationLocksError?'確定状態を確認できません。更新してください。':!isAssignedTournamentStaff(tournamentId)?'この大会のスタッフ権限がありません。':!['published','in_progress'].includes(tournament?.status)?'公開中または進行中の大会のみ操作できます。':'順位・権限・通信の確認が完了していません。';
+ return `<section class="card stack"><div class="row"><h3>決勝進出者</h3><span class="status ${locked?'done':'pending'}">${locked?'確定済み':'未確定'}</span></div>${stages.length===1?`<p class="prompt">${esc(stages[0].name)} ／ 各組上位 ${esc(Number.isFinite(top)?top:'未設定')}ペア ／ ワイルドカード ${esc(Number.isFinite(wild)?wild:'未設定')}ペア ／ 予定 ${esc(expected??'未設定')}ペア</p>`:''}${locked?'<div class="notice blue">進出者は確定済みです。重複確定はできません。</div>':`<button type="button" class="btn wide" data-qualifier-preview="${esc(categoryId)}" ${ready&&expected!==null?'':'disabled'}>${qualifierUi.busy&&qualifierUi.categoryId===categoryId?'確認・保存中…':'決勝進出候補を確認'}</button>${ready&&expected!==null?'':`<p class="prompt">${esc(reason)}</p>`}`}${qualifierUi.categoryId===categoryId&&qualifierUi.message?`<p class="${qualifierUi.ok?'notice blue':'empty-error'}" role="status">${esc(qualifierUi.message)}</p>`:''}</section>`;
+}
+async function confirmKnockoutQualifiers(categoryId){
+ if(qualifierUi.busy)return;
+ const stage=state.stages.find(s=>s.category_id===categoryId&&s.stage_type==='knockout');
+ const cat=state.categories.find(c=>c.id===categoryId);
+ const tid=cat?.tournament_id;
+ if(!stage||!cat||!isAssignedTournamentStaff(tid)||state.qualificationLocks.includes(categoryId)||!state.qualificationLocksLoaded||state.qualificationLocksError||!state.approvedLoaded||state.approvedError)return;
+ qualifierUi.busy=true;qualifierUi.categoryId=categoryId;qualifierUi.message='';qualifierUi.ok=false;render();
+ let attempted=false;
+ try{
+  const settings=stage.settings?.qualification||{};
+  const top=Number(settings.top_n_per_group),wild=Number(settings.wildcard_count);
+  if(!Number.isInteger(top)||top<1||!Number.isInteger(wild)||wild<0)throw Error('決勝進出条件が正しくありません。');
+  const groups=[...new Set(state.pairs.filter(p=>p.category_id===categoryId&&p.participation_status==='active'&&p.group_name).map(p=>p.group_name))];
+  const expected=groups.length*top+wild;
+  if(groups.length<1||expected<2)throw Error('決勝進出人数が不足しています。');
+  const [candidateResult,bracketResult,authResult]=await Promise.all([
+   client.rpc('get_knockout_qualification_candidates',{p_stage_id:stage.id}),
+   client.from('knockout_brackets').select('id,stage_id').eq('stage_id',stage.id),
+   client.auth.getUser()
+  ]);
+  if(candidateResult.error||bracketResult.error||authResult.error)throw Error(candidateResult.error?.message||bracketResult.error?.message||authResult.error?.message);
+  if(authResult.data?.user?.id!==state.auth?.id||bracketResult.data?.length)throw Error('ログイン状態が変わったか、決勝進出者がすでに確定されています。');
+  const candidates=candidateResult.data||[];
+  if(candidates.length!==expected||new Set(candidates.map(p=>p.pair_id)).size!==expected||candidates.some(p=>p.tie_requires_review||!p.pair_id||!p.seed_rank||!state.pairs.some(x=>x.id===p.pair_id&&x.category_id===categoryId&&x.participation_status==='active')))throw Error('候補数・同順位・有効ペアに問題があります。順位を確認してください。');
+  const ordered=candidates.slice().sort((a,b)=>Number(a.seed_rank)-Number(b.seed_rank));
+  if(ordered.some((x,i)=>Number(x.seed_rank)!==i+1))throw Error('シード順が正しくありません。');
+  const signature=JSON.stringify(ordered.map(x=>[x.pair_id,x.group_name,x.preliminary_rank,x.seed_rank]));
+  const lines=ordered.map(x=>`第${x.seed_rank}シード：${x.pair_name}（${x.group_name}組 ${x.preliminary_rank}位）`).join('\n');
+  if(!confirm(`【決勝進出者の確定】\n大会：${state.tournaments.find(t=>t.id===tid)?.name}\nカテゴリー：${cat.name}\n\n${lines}\n\n確定後は予選結果・順位承認が保護されます。\nこの内容でSupabaseへ保存しますか？`))return;
+  // Refresh everything after user approval. Recalculate candidates to reject stale confirmation.
+  await loadData();
+  const latest=state.stages.find(s=>s.id===stage.id&&s.category_id===categoryId&&s.stage_type==='knockout');
+  const tournament=state.tournaments.find(t=>t.id===tid);
+  if(!latest||!['published','in_progress'].includes(tournament?.status)||!isAssignedTournamentStaff(tid)||state.qualificationLocks.includes(categoryId)||!state.qualificationLocksLoaded||state.qualificationLocksError||!state.approvedLoaded||state.approvedError||state.error||JSON.stringify(latest.settings?.qualification)!==JSON.stringify(stage.settings?.qualification))throw Error('確定直前に設定・権限・承認状態が変わりました。');
+  const [freshResult,existingResult]=await Promise.all([client.rpc('get_knockout_qualification_candidates',{p_stage_id:stage.id}),client.from('knockout_brackets').select('id').eq('stage_id',stage.id)]);
+  if(freshResult.error||existingResult.error||existingResult.data?.length)throw Error(freshResult.error?.message||existingResult.error?.message||'すでに確定されています。');
+  const fresh=(freshResult.data||[]).slice().sort((a,b)=>Number(a.seed_rank)-Number(b.seed_rank));
+  if(fresh.length!==expected||fresh.some(x=>x.tie_requires_review)||JSON.stringify(fresh.map(x=>[x.pair_id,x.group_name,x.preliminary_rank,x.seed_rank]))!==signature)throw Error('進出候補が確認時から変わりました。');
+  attempted=true;
+  const {data:bracketId,error:rpcError}=await client.rpc('staff_confirm_knockout_qualifiers',{p_stage_id:stage.id});
+  if(rpcError)throw Error(rpcError.message);
+  if(!bracketId)throw Error('保存結果のIDを受け取れませんでした。');
+  const [verifiedBracket,verifiedPairs]=await Promise.all([client.from('knockout_brackets').select('id,stage_id,status').eq('id',bracketId).single(),client.from('knockout_qualifiers').select('bracket_id,pair_id,group_name,preliminary_rank,seed_rank').eq('bracket_id',bracketId)]);
+  if(verifiedBracket.error||verifiedPairs.error||verifiedBracket.data?.stage_id!==stage.id||verifiedBracket.data?.status!=='confirmed')throw Error('決勝進出者の保存後照合に失敗しました。');
+  const actual=(verifiedPairs.data||[]).slice().sort((a,b)=>Number(a.seed_rank)-Number(b.seed_rank));
+  if(actual.length!==expected||actual.some((p,i)=>p.pair_id!==ordered[i].pair_id||p.group_name!==ordered[i].group_name||Number(p.preliminary_rank)!==Number(ordered[i].preliminary_rank)||Number(p.seed_rank)!==i+1))throw Error('保存された進出者が確認内容と一致しません。');
+  await loadData();
+  if(state.error||!state.qualificationLocksLoaded||!state.qualificationLocks.includes(categoryId))throw Error('確定状態の再取得に失敗しました。');
+  qualifierUi.ok=true;qualifierUi.message=`決勝進出者 ${expected}ペアを確定し、Supabaseの保存内容を照合しました。`;
+ }catch(e){qualifierUi.ok=false;qualifierUi.message='決勝進出者の確定を確認できませんでした：'+e.message+(attempted?'。保存済みの可能性があります。再度押さず「更新」で確認してください。':'。保存操作は実行していません。');}
+ finally{qualifierUi.busy=false;render();}
 }
 function targetRankingGroup(key){return rankingGroups().find(g=>g.key===key)}
 async function approveRanking(key){
@@ -2340,7 +2412,7 @@ function operationsPlaceholder(kind){
  if(kind==='ops_checkin')return '<h2>受付</h2><div class="notice">受付・チェックインは設計済み・未実装です。現在は受付状態の保存や当日キャンセル操作を行えません。実装後に大会運営へ接続します。</div>';
  return '<h2>大会終了</h2><div class="notice">大会終了の確定・ロック処理は未実装です。既存の試合結果と承認状態は変更されません。</div>';
 }
-function render(){if(areaOf(state.tab)==='ops'&&!state.staff)state.tab='public_home';if(state.tab==='manage'&&!canOpenManage())state.tab='public_home';navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;if(state.matchNumberError)top+=`<div class="notice">試合番号を取得できない項目があります。更新してください：${esc(state.matchNumberError)}</div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':(areaOf(state.tab)==='public'?publicScreen():({home,matches,courts,bracket,ranking,manage,ops_checkin:receptionSection,ops_permissions:permissionDiagnosticSection,ops_close:()=>operationsPlaceholder('ops_close')})[state.tab]());$('screen').innerHTML=top+secondaryNavigation()+content+'<footer>v10簡素化版｜大会準備5画面（開発プレビュー）</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.section;render();if(state.tab==='ops_checkin')refreshReceptionCheckins();window.scrollTo(0,0)});document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));document.querySelectorAll('[data-official-confirm]').forEach(b=>b.onclick=()=>confirmOfficial(b.dataset.officialConfirm));document.querySelectorAll('[data-official-revoke]').forEach(b=>b.onclick=()=>revokeOfficial(b.dataset.officialRevoke));document.querySelectorAll('[data-ranking-approve]').forEach(b=>b.onclick=()=>approveRanking(b.dataset.rankingApprove));document.querySelectorAll('[data-ranking-revoke]').forEach(b=>b.onclick=()=>revokeRanking(b.dataset.rankingRevoke));document.querySelectorAll('[data-ranking-resolve]').forEach(b=>b.onclick=()=>resolveRankingModal(b.dataset.rankingResolve));wireControls();const permissionTournament=$('permissionTournament');if(permissionTournament)permissionTournament.onchange=()=>{permissionDiagnostic.tournamentId=permissionTournament.value;permissionDiagnostic.rows=[];permissionDiagnostic.message='';permissionDiagnostic.checkedAt='';render()};const permissionRun=$('runPermissionDiagnostic');if(permissionRun)permissionRun.onclick=runPermissionDiagnostic;document.querySelectorAll('[data-prep-page]').forEach(b=>b.onclick=()=>{prepPage=b.dataset.prepPage;if(prepPage==='publish')clearPublishState();render();window.scrollTo(0,0)});if(state.tab==='matches'){
+function render(){if(areaOf(state.tab)==='ops'&&!state.staff)state.tab='public_home';if(state.tab==='manage'&&!canOpenManage())state.tab='public_home';navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;if(state.matchNumberError)top+=`<div class="notice">試合番号を取得できない項目があります。更新してください：${esc(state.matchNumberError)}</div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':(areaOf(state.tab)==='public'?publicScreen():({home,matches,courts,bracket,ranking,manage,ops_checkin:receptionSection,ops_permissions:permissionDiagnosticSection,ops_close:()=>operationsPlaceholder('ops_close')})[state.tab]());$('screen').innerHTML=top+secondaryNavigation()+content+'<footer>v10簡素化版｜大会準備5画面（開発プレビュー）</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.section;render();if(state.tab==='ops_checkin')refreshReceptionCheckins();window.scrollTo(0,0)});document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));document.querySelectorAll('[data-official-confirm]').forEach(b=>b.onclick=()=>confirmOfficial(b.dataset.officialConfirm));document.querySelectorAll('[data-official-revoke]').forEach(b=>b.onclick=()=>revokeOfficial(b.dataset.officialRevoke));document.querySelectorAll('[data-ranking-approve]').forEach(b=>b.onclick=()=>approveRanking(b.dataset.rankingApprove));document.querySelectorAll('[data-qualifier-preview]').forEach(b=>b.onclick=()=>confirmKnockoutQualifiers(b.dataset.qualifierPreview));document.querySelectorAll('[data-ranking-revoke]').forEach(b=>b.onclick=()=>revokeRanking(b.dataset.rankingRevoke));document.querySelectorAll('[data-ranking-resolve]').forEach(b=>b.onclick=()=>resolveRankingModal(b.dataset.rankingResolve));wireControls();const permissionTournament=$('permissionTournament');if(permissionTournament)permissionTournament.onchange=()=>{permissionDiagnostic.tournamentId=permissionTournament.value;permissionDiagnostic.rows=[];permissionDiagnostic.message='';permissionDiagnostic.checkedAt='';render()};const permissionRun=$('runPermissionDiagnostic');if(permissionRun)permissionRun.onclick=runPermissionDiagnostic;document.querySelectorAll('[data-prep-page]').forEach(b=>b.onclick=()=>{prepPage=b.dataset.prepPage;if(prepPage==='publish')clearPublishState();render();window.scrollTo(0,0)});if(state.tab==='matches'){
  const search=$('matchNumberSearch'),pending=$('pendingMatchesOnly'),clear=$('clearMatchSearch');
  if(search)search.oninput=()=>{matchListFilter.query=search.value;updateMatchListResults()};
  if(pending)pending.onchange=()=>{matchListFilter.pendingOnly=pending.checked;updateMatchListResults()};
