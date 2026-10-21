@@ -919,15 +919,16 @@ function provisionalFinalSection(t,categories){
  const slotCount=state.bracketSlots.filter(s=>s.stage_id===knock?.id).length;
  const groups=new Set(state.pairs.filter(p=>p.category_id===c.id&&p.participation_status==='active'&&p.group_name).map(p=>p.group_name));
  const qualifiers=groups.size*Number(c.qualifiers_per_group||0);
- const selected=groups.size>=2&&c.final_format==='knockout'&&qualifiers===2;
+ const selected=groups.size===2&&groups.has('A')&&groups.has('B')&&Number(c.qualifiers_per_group)===1&&c.final_format==='knockout';
  const eligible=!!client&&t.status==='draft'&&state.staff&&state.tournamentAdminIds.includes(t.id)&&!state.loading&&!state.error&&!state.bracketError&&!provisionalFinalUI.busy&&selected&&prelimMatches.length>0&&ms.length===prelimMatches.length&&prelimMatches.every(m=>m.pair_a_id&&m.pair_b_id)&&!knock;
  let status='';
  if(groups.size===1&&prelimMatches.length>0)status='<div class="notice blue"><b>予選が1組のため決勝は行いません。</b>予選順位を最終順位として使用します。'+(knock||finalMatches.length?' このカテゴリーには旧仕様の決勝データがあります。テストデータ整理時に削除してください。':'')+'</div>';
  else if(finalMatches.length===1&&slotCount===1)status='<div class="notice blue">決勝の仮試合1件を確認しました。進出ペアは予選順位確定後に反映します。再生成はしません。</div>';
  else if(knock||finalMatches.length)status='<div class="notice">決勝ステージまたは決勝枠が既にあります。重複生成しません。状態は「更新」で確認してください。</div>';
- else if(!selected)status='<div class="notice">この画面からの仮決勝作成は現在「進出2ペアのトーナメント」のみ対応しています。それ以外の決勝形式は未完成です。</div>';
+ else if(!selected)status='<div class="notice">現在、決勝仮試合作成は「A組・B組の各1位が進出するトーナメント」に対応しています。各組2位までや3組以上の決勝は後続工程で対応します。</div>';
  else if(!prelimMatches.length)status='<div class="notice">先に予選対戦表を生成してください。</div>';
- const button=(groups.size>=2&&!knock&&!finalMatches.length)?`<button type="button" class="btn wide" id="createProvisionalFinal" ${eligible?'':'disabled'}>${provisionalFinalUI.busy?'保存中…':'決勝の仮試合1件を作成して保存'}</button>`:'';
+ else if(selected)status='<div class="notice blue">決勝カード：<b>A組1位 対 B組1位</b>。実際のペア名は予選順位確定後に反映します。</div>';
+ const button=(selected&&!knock&&!finalMatches.length)?`<button type="button" class="btn wide" id="createProvisionalFinal" ${eligible?'':'disabled'}>${provisionalFinalUI.busy?'保存中…':'決勝の仮試合1件を作成して保存'}</button>`:'';
  return `<h2>決勝の仮対戦表</h2><div class="card stack"><div><label for="provisionalFinalCategory">対象カテゴリー</label><select class="field" id="provisionalFinalCategory">${categories.map(x=>opt(x.id,x.name,c.id)).join('')}</select></div><p class="prompt">決勝方式：${esc(c.final_format==='knockout'?'トーナメント':c.final_format==='round_robin'?'総当たり':'未設定')} ／ 予選組数：${groups.size} ／ 進出予定：${qualifiers}ペア ／ 予選試合：${prelimMatches.length}件 ／ 決勝試合：${finalMatches.length}件</p>${status}${button}${provisionalFinalUI.message?`<div role="status" class="${provisionalFinalUI.ok?'notice blue':'empty-error'}">${esc(provisionalFinalUI.message)}</div>`:''}<p class="prompt">保存時はサーバーで権限・大会状態・予選組・既存試合を再確認します。既存予選試合・試合時刻・コートには触れません。</p></div>`;
 }
 async function createProvisionalFinal(){
@@ -936,14 +937,14 @@ async function createProvisionalFinal(){
  const t=state.tournaments.find(x=>x.id===tid),c=state.categories.find(x=>x.id===cid&&x.tournament_id===tid);
  if(!t||!c||t.status!=='draft'||!state.tournamentAdminIds.includes(tid)||!state.staff)return;
  const activeGroups=new Set(state.pairs.filter(p=>p.category_id===cid&&p.participation_status==='active'&&p.group_name).map(p=>p.group_name));
- if(activeGroups.size<2){provisionalFinalUI.message='予選が1組の場合は決勝を作成しません。';provisionalFinalUI.ok=false;render();return;}
- if(!confirm(`「${c.name}」の決勝仮試合を1件作成しますか？\n予選試合と既存時間割は変更しません。`))return;
+ if(activeGroups.size!==2||!activeGroups.has('A')||!activeGroups.has('B')||Number(c.qualifiers_per_group)!==1||c.final_format!=='knockout'){provisionalFinalUI.message='現在はA組・B組の各1位が進む決勝戦のみ作成できます。';provisionalFinalUI.ok=false;render();return;}
+ if(!confirm(`「${c.name}」の決勝戦（A組1位 対 B組1位）を1件作成しますか？\n予選試合と既存時間割は変更しません。`))return;
  provisionalFinalUI.busy=true;provisionalFinalUI.message='';render();let attempted=false;
  try{
   await loadData();
   if(state.error||categoryForm.tournamentId!==tid||provisionalFinalUI.categoryId!==cid||!state.tournamentAdminIds.includes(tid))throw Error('大会または権限を再確認できません。');
   const refreshedGroups=new Set(state.pairs.filter(p=>p.category_id===cid&&p.participation_status==='active'&&p.group_name).map(p=>p.group_name));
-  if(refreshedGroups.size<2)throw Error('予選が1組のため決勝は作成しません。');
+  if(refreshedGroups.size!==2||!refreshedGroups.has('A')||!refreshedGroups.has('B')||Number(state.categories.find(x=>x.id===cid)?.qualifiers_per_group)!==1||state.categories.find(x=>x.id===cid)?.final_format!=='knockout')throw Error('予選組数または決勝進出条件が変更されました。');
   const existing=state.stages.filter(s=>s.category_id===cid&&s.stage_type==='knockout');
   if(existing.length||state.matches.some(m=>m.category_id===cid&&state.stages.some(s=>s.id===m.stage_id&&s.stage_type!=='preliminary')))throw Error('決勝関連データが既に存在します。');
   attempted=true;
