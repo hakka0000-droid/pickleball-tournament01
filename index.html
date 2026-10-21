@@ -1133,23 +1133,69 @@ async function confirmWithdrawalSchedule(){
  finally{ui.busy=false;render();}
 }
 // Read-only confirmation dialog; deliberately contains no Supabase writes.
-function previewWithdrawalConfirmation(){
- const ui=withdrawalShiftPreviewState;
- const t=state.tournaments.find(x=>x.id===categoryForm.tournamentId);
- let plan;
- try{plan=withdrawalShiftPlan(t,ui.pairId)}catch(e){alert('プレビューを確認できません：'+e.message);return;}
- if(!withdrawalConfirmationAllowed(t,plan)){alert('大会・権限・開始前条件を確認できません。');return;}
- const reason=ui.reason.trim();
- if(!reason||reason.length>500){alert('キャンセル理由を1〜500文字で入力してください。');return;}
- const pair=state.pairs.find(p=>p.id===ui.pairId);
- if(!pair){alert('キャンセル対象ペアを確認できません。');return;}
- const fmt=ms=>new Date(ms).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'});
- const detail=plan.changes.map(x=>`${matchCode(x.m)||x.m.id.slice(0,8)}：${fmt(x.oldAt)} → ${fmt(x.newAt)}／${courtName(x.courtId)}`).join('\n');
- window.confirm(`【保存しない・確認画面のテスト】\n\n大会：${t.name}\nキャンセル対象：${pair.display_name}\n理由：${reason}\n不戦勝等：${plan.cancelled.length}試合\n残る予定試合：${plan.remaining}試合\n繰り上げ候補：${plan.changes.length}試合\n${detail||'繰り上げなし（空き枠維持）'}\n\n「OK」「キャンセル」のどちらを押しても保存されません。\nこの画面ではSupabaseの更新RPCを呼び出しません。`);
- ui.ok=true;
- ui.message='確認画面の表示テストが完了しました。データは保存していません。';
- render();
+// STEP 251: read-only server preflight. No withdrawal or schedule-write RPC is called.
+async function previewWithdrawalConfirmation(){
+  const ui=withdrawalShiftPreviewState;
+  if(ui.busy)return;
+  const tid=categoryForm.tournamentId, pairId=ui.pairId;
+  const t=state.tournaments.find(x=>x.id===tid);
+  let plan;
+  try{plan=withdrawalShiftPlan(t,pairId)}catch(e){ui.ok=false;ui.message='プレビューを確認できません：'+e.message;render();return;}
+  if(!withdrawalConfirmationAllowed(t,plan)){ui.ok=false;ui.message='大会・権限・開始前条件を確認できません。';render();return;}
+  const reason=ui.reason.trim();
+  if(!reason||reason.length>500){ui.ok=false;ui.message='キャンセル理由を1〜500文字で入力してください。';render();return;}
+  const pair=state.pairs.find(p=>p.id===pairId);
+  if(!pair){ui.ok=false;ui.message='キャンセル対象ペアを確認できません。';render();return;}
+  const before=scheduleFingerprint(tid);
+  const cached=tournamentMatches(tid);
+  const categoryIds=state.categories.filter(c=>c.tournament_id===tid).map(c=>c.id);
+  ui.busy=true;ui.ok=false;ui.message='Supabaseの最新情報を読み取り照合しています。';render();
+  try{
+    if(!categoryIds.length||cached.length===0||cached.length>1000)throw Error('試合数またはカテゴリーの範囲外です。');
+    const [matchResult,pairResult,tournamentResult,authResult]=await Promise.all([
+      client.from('matches').select('id,category_id,status,pair_a_id,pair_b_id,court_id,start_time,updated_at').in('category_id',categoryIds).order('id').limit(1001),
+      client.from('pairs').select('id,category_id,display_name,participation_status').eq('id',pairId).single(),
+      client.from('tournaments').select('id,name,status,event_date,start_time,end_time,match_minutes,minimum_rest_minutes,max_consecutive_matches').eq('id',tid).single(),
+      client.auth.getUser()
+    ]);
+    if(matchResult.error||pairResult.error||tournamentResult.error||authResult.error)
+      throw Error('最新情報の取得に失敗しました：'+(matchResult.error?.message||pairResult.error?.message||tournamentResult.error?.message||authResult.error?.message));
+    const dbMatches=matchResult.data,dbPair=pairResult.data,dbTournament=tournamentResult.data;
+    if(!Array.isArray(dbMatches)||dbMatches.length!==cached.length||dbMatches.length>1000)
+      throw Error('試合件数が変更されました。画面を更新してください。');
+    const originals=new Map(cached.map(m=>[m.id,m]));
+    const sameTime=(a,b)=>a==null&&b==null||(a!=null&&b!=null&&new Date(a).getTime()===new Date(b).getTime());
+    const changed=dbMatches.some(m=>{
+      const previous=originals.get(m.id);
+      return !previous||m.category_id!==previous.category_id||m.status!==previous.status
+        ||m.pair_a_id!==previous.pair_a_id||m.pair_b_id!==previous.pair_b_id
+        ||m.court_id!==previous.court_id||!sameTime(m.start_time,previous.start_time)
+        ||!m.updated_at||!previous.updated_at||new Date(m.updated_at).getTime()!==new Date(previous.updated_at).getTime();
+    });
+    if(changed)throw Error('試合情報がプレビュー時から変更されています。画面を更新してください。');
+    if(!dbPair||dbPair.id!==pairId||dbPair.category_id!==pair.category_id||dbPair.display_name!==pair.display_name||dbPair.participation_status!=='active')
+      throw Error('対象ペアの参加状態・情報が変更されています。');
+    if(!dbTournament||dbTournament.id!==tid||dbTournament.name!==t.name||dbTournament.status!==t.status
+      ||String(dbTournament.event_date).slice(0,10)!==String(t.event_date).slice(0,10)
+      ||String(dbTournament.start_time).slice(0,5)!==String(t.start_time).slice(0,5)
+      ||String(dbTournament.end_time).slice(0,5)!==String(t.end_time).slice(0,5)
+      ||Number(dbTournament.match_minutes)!==Number(t.match_minutes)
+      ||Number(dbTournament.minimum_rest_minutes)!==Number(t.minimum_rest_minutes)
+      ||Number(dbTournament.max_consecutive_matches)!==Number(t.max_consecutive_matches))
+      throw Error('大会設定が変更されています。');
+    if(authResult.data?.user?.id!==state.auth?.id||!state.staff||!state.tournamentAdminIds.includes(tid))
+      throw Error('管理者の認証状態を確認できません。');
+    if(categoryForm.tournamentId!==tid||ui.pairId!==pairId||ui.reason.trim()!==reason||scheduleFingerprint(tid)!==before)
+      throw Error('照合中に画面の内容が変更されました。再確認してください。');
+    const fmt=ms=>new Date(ms).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'});
+    const detail=plan.changes.map(x=>`${matchCode(x.m)||x.m.id.slice(0,8)}：${fmt(x.oldAt)} → ${fmt(x.newAt)}／${courtName(x.courtId)}`).join('\n');
+    window.confirm(`【保存しない・最新DB照合済み】\n\n大会：${t.name}\nキャンセル対象：${pair.display_name}\n理由：${reason}\nDB照合：${dbMatches.length}試合\n不戦勝等：${plan.cancelled.length}試合\n残る予定試合：${plan.remaining}試合\n繰り上げ候補：${plan.changes.length}試合\n${detail||'繰り上げなし（空き枠維持）'}\n\n「OK」「キャンセル」のどちらを押しても保存されません。\nSupabaseの更新RPCは呼び出しません。`);
+    ui.ok=true;
+    ui.message=`読み取り照合合格：${dbMatches.length}試合。確認画面のみ表示しました。データは保存していません。`;
+  }catch(e){ui.ok=false;ui.message='最新DB照合を中止しました：'+e.message+'。保存処理は実行していません。';}
+  finally{ui.busy=false;render();}
 }
+
 function withdrawalShiftSection(t){
  if(!t||state.loading||state.error||state.courtLoadError)return '';
  const all=tournamentMatches(t.id);
@@ -1166,7 +1212,7 @@ function withdrawalShiftSection(t){
   const blockedRows=r.blocked.slice(0,30).map(x=>`<tr><td>${esc(courtName(x.courtId))} ${esc(fmt(x.at))}</td><td>${esc(matchCode(x.match)||x.match.id.slice(0,8))}</td><td>${esc(x.issue)}</td></tr>`).join('');
   result=`<div class="metrics"><div class="metric"><small>不戦勝等の対象</small><strong>${r.cancelled.length}</strong></div><div class="metric"><small>残る予定試合</small><strong>${r.remaining}</strong></div><div class="metric"><small>繰り上げ候補</small><strong>${r.changes.length}</strong></div></div><h3>繰り上げ可能な候補</h3>${moveRows?`<div class="tablebox"><table class="tbl"><thead><tr><th>試合</th><th>コート</th><th>変更前</th><th>変更後</th></tr></thead><tbody>${moveRows}</tbody></table></div>`:'<p class="notice">今回の条件では、安全に繰り上げられる試合を見つけられませんでした。空き枠を維持します。</p>'}<details><summary>移動を見送った候補・理由（${r.blocked.length}件）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>空き枠</th><th>候補試合</th><th>理由</th></tr></thead><tbody>${blockedRows||'<tr><td colspan="3">なし</td></tr>'}</tbody></table></div></details>`;
  }catch(e){result=`<div class="notice">プレビューできません：${esc(e.message)}</div>`;}
- return `<div class="card stack"><h3>当日開始前・1組キャンセルの繰り上げプレビュー</h3><div class="notice blue">確認専用モードです。最終確認画面の表示だけをテストし、キャンセルや時間割のDB保存は実行しません。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}${(()=>{let plan=null;try{plan=withdrawalShiftPlan(t,selected)}catch(_e){}const reasonValid=withdrawalShiftPreviewState.reason.trim().length>0&&withdrawalShiftPreviewState.reason.trim().length<=500;const enabled=withdrawalConfirmationAllowed(t,plan)&&reasonValid;return `<div class="line"></div><h3>キャンセルを確定する（テスト大会限定）</h3><div class="notice">STEP 250の安全確認版です。「確認画面をテスト」では実データを変更しません。V10_TEST_一括登録（下書き・大会開始前）のみ有効です。他大会ではボタンを無効化しています。</div><label for="withdrawalConfirmReason">キャンセル理由</label><textarea class="field" id="withdrawalConfirmReason" rows=2 maxlength=500>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmWithdrawalSchedule" ${enabled?'':'disabled'}>${withdrawalShiftPreviewState.busy?'確定・照合中…':'確定前の確認画面をテスト（保存しない）'}</button>${!reasonValid?'<p class="prompt" id="withdrawalReasonHint">キャンセル理由（1〜500文字）を入力すると、ほかの条件を満たす場合に確定できます。</p>':!enabled?'<p class="prompt" id="withdrawalReasonHint">対象テスト大会、下書き、開始前、管理者権限、完全なプレビューが必要です。</p>':''}${withdrawalShiftPreviewState.message?`<p class="${withdrawalShiftPreviewState.ok?'notice blue':'empty-error'}" role="status">${esc(withdrawalShiftPreviewState.message)}</p>`:''}`})()}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。この版では確定保存を無効化しています。公開済み大会への適用は別工程です。サーバー側で最終検証を行います。</p></div>`;
+ return `<div class="card stack"><h3>当日開始前・1組キャンセルの繰り上げプレビュー</h3><div class="notice blue">確認専用モードです。最新DBとの読み取り照合と確認画面の表示だけをテストし、キャンセルや時間割のDB保存は実行しません。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}${(()=>{let plan=null;try{plan=withdrawalShiftPlan(t,selected)}catch(_e){}const reasonValid=withdrawalShiftPreviewState.reason.trim().length>0&&withdrawalShiftPreviewState.reason.trim().length<=500;const enabled=withdrawalConfirmationAllowed(t,plan)&&reasonValid;return `<div class="line"></div><h3>キャンセルを確定する（テスト大会限定）</h3><div class="notice">STEP 251の安全確認版です。最新の試合・ペア・大会情報を読み取り照合してから確認画面を表示します。DBは変更しません。V10_TEST_一括登録（下書き・大会開始前）のみ有効です。他大会ではボタンを無効化しています。</div><label for="withdrawalConfirmReason">キャンセル理由</label><textarea class="field" id="withdrawalConfirmReason" rows=2 maxlength=500>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmWithdrawalSchedule" ${enabled?'':'disabled'}>${withdrawalShiftPreviewState.busy?'最新DB照合中…':'最新DB照合＋確認画面テスト（保存しない）'}</button>${!reasonValid?'<p class="prompt" id="withdrawalReasonHint">キャンセル理由（1〜500文字）を入力すると、ほかの条件を満たす場合に確定できます。</p>':!enabled?'<p class="prompt" id="withdrawalReasonHint">対象テスト大会、下書き、開始前、管理者権限、完全なプレビューが必要です。</p>':''}${withdrawalShiftPreviewState.message?`<p class="${withdrawalShiftPreviewState.ok?'notice blue':'empty-error'}" role="status">${esc(withdrawalShiftPreviewState.message)}</p>`:''}`})()}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。この版では確定保存を無効化しています。公開済み大会への適用は別工程です。サーバー側で最終検証を行います。</p></div>`;
 }
 
 // STEP 22-6-9-139: whole-tournament fair rescheduling of draft, unplayed games.
