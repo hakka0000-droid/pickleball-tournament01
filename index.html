@@ -61,7 +61,7 @@ const $=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const opt=(value,label,selected)=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`;
 const CONF=window.PICKLEBALL_SUPABASE_CONFIG||{};
-const OPS_TABS=[['home','進行状況'],['ops_checkin','受付'],['matches','試合・結果入力'],['courts','コート別'],['ranking','予選順位'],['bracket','決勝'],['ops_close','大会終了']];
+const OPS_TABS=[['home','進行状況'],['ops_checkin','受付'],['ops_permissions','権限診断'],['matches','試合・結果入力'],['courts','コート別'],['ranking','予選順位'],['bracket','決勝'],['ops_close','大会終了']];
 const PUBLIC_TABS=[['public_home','大会概要'],['public_matches','試合予定・結果'],['public_rankings','順位・決勝']];
 const TABS=[...OPS_TABS,['manage','大会準備']];
 const matchListFilter={query:'',pendingOnly:false};
@@ -2120,6 +2120,54 @@ function openReceptionWithdrawal(pairId){
  const panel=document.getElementById('receptionWithdrawalPanel');
  if(panel)panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
+// STEP 256-62: read-only authorization diagnostic. Never calls a write RPC.
+const permissionDiagnostic={tournamentId:'',busy:false,checkedAt:'',message:'',rows:[]};
+function permissionDiagnosticSection(){
+ const tournaments=state.tournaments.filter(t=>isAssignedTournamentStaff(t.id));
+ if(!tournaments.length)return '<h2>権限診断</h2><div class="notice">担当大会がありません。認証情報を更新してください。</div>';
+ if(!tournaments.some(t=>t.id===permissionDiagnostic.tournamentId))permissionDiagnostic.tournamentId=tournaments[0].id;
+ const tid=permissionDiagnostic.tournamentId;
+ const results=permissionDiagnostic.rows.filter(r=>r.tid===tid);
+ const table=results.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.value)}</td></tr>`).join('');
+ return `<h2>権限診断（読み取り専用）</h2><div class="notice blue">ログイン本人の認証と大会役割をSupabaseから再取得して表示します。受付・欠場・時間割の保存RPCは呼びません。</div>
+ <div class="card stack"><div><label for="permissionTournament">対象大会</label><select class="field" id="permissionTournament">${tournaments.map(t=>opt(t.id,t.name,tid)).join('')}</select></div>
+ <button type="button" id="runPermissionDiagnostic" class="btn wide" ${permissionDiagnostic.busy?'disabled':''}>${permissionDiagnostic.busy?'診断中…':'権限を再確認する（保存なし）'}</button>
+ ${permissionDiagnostic.message?`<p class="${permissionDiagnostic.checkedAt?'notice blue':'empty-error'}" role="status">${esc(permissionDiagnostic.message)}</p>`:''}
+ ${table?`<div class="tablebox"><table class="tbl"><thead><tr><th>確認項目</th><th>結果</th></tr></thead><tbody>${table}</tbody></table></div>`:''}
+ <p class="prompt">「管理者のみ」「スタッフ可」は設計上の期待権限です。この画面はRPCを実行して拒否を試すテストではないため、サーバー側のアクセス制御を証明するものではありません。スタッフ用欠場確定RPCは現在停止中です。</p></div>`;
+}
+async function runPermissionDiagnostic(){
+ if(permissionDiagnostic.busy||!client||!state.auth)return;
+ const tid=permissionDiagnostic.tournamentId;
+ permissionDiagnostic.busy=true;permissionDiagnostic.checkedAt='';permissionDiagnostic.message='';permissionDiagnostic.rows=[];render();
+ try{
+  const auth=await client.auth.getUser();
+  if(auth.error||!auth.data?.user||auth.data.user.id!==state.auth.id)throw Error('ログイン本人の再確認に失敗しました。');
+  const uid=auth.data.user.id;
+  const [staff,role]=await Promise.all([
+   client.from('staff_users').select('user_id,is_active').eq('user_id',uid).maybeSingle(),
+   client.from('tournament_staff').select('tournament_id,role').eq('user_id',uid).eq('tournament_id',tid)
+  ]);
+  if(staff.error||role.error)throw Error('スタッフ権限を読み取れません：'+(staff.error?.message||role.error?.message));
+  const active=staff.data?.is_active===true;
+  if((role.data||[]).length>1)throw Error('大会役割が重複しています。');
+  const roleValue=active?role.data?.[0]?.role||'未登録':'無効／未登録';
+  if(!['admin','staff'].includes(roleValue))throw Error('この大会の有効な担当スタッフではありません。');
+  const expectedAdmin=roleValue==='admin';
+  permissionDiagnostic.rows=[
+   {tid,name:'ログイン本人の確認',value:'OK（認証サーバーで再確認）'},
+   {tid,name:'スタッフ登録',value:active?'有効':'無効'},
+   {tid,name:'対象大会での役割',value:roleValue},
+   {tid,name:'受付登録',value:'スタッフ・管理者ともに可能（設計上）'},
+   {tid,name:'受付取消',value:expectedAdmin?'管理者に許可（設計上）':'管理者のみ・この役割では不可（設計上）'},
+   {tid,name:'通常の時間割再編成',value:expectedAdmin?'管理者に許可（設計上）':'管理者のみ・この役割では不可（設計上）'},
+   {tid,name:'スタッフ用欠場確定',value:'外部実行停止中（SQLで確認済み・この画面では再検証しません）'}
+  ];
+  permissionDiagnostic.checkedAt=new Date().toLocaleString('ja-JP');
+  permissionDiagnostic.message='認証と大会役割の読み取りに成功しました（'+permissionDiagnostic.checkedAt+'）。';
+ }catch(e){permissionDiagnostic.message='診断を完了できませんでした：'+e.message;}
+ finally{permissionDiagnostic.busy=false;render();}
+}
 function receptionSection(){
  const eligible=state.tournaments.filter(t=>isAssignedTournamentStaff(t.id));
  if(!eligible.length)return '<h2>受付</h2><div class="notice">閲覧できる大会がありません。</div>';
@@ -2151,7 +2199,7 @@ function operationsPlaceholder(kind){
  if(kind==='ops_checkin')return '<h2>受付</h2><div class="notice">受付・チェックインは設計済み・未実装です。現在は受付状態の保存や当日キャンセル操作を行えません。実装後に大会運営へ接続します。</div>';
  return '<h2>大会終了</h2><div class="notice">大会終了の確定・ロック処理は未実装です。既存の試合結果と承認状態は変更されません。</div>';
 }
-function render(){if(areaOf(state.tab)==='ops'&&!state.staff)state.tab='public_home';if(state.tab==='manage'&&!canOpenManage())state.tab='public_home';navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;if(state.matchNumberError)top+=`<div class="notice">試合番号を取得できない項目があります。更新してください：${esc(state.matchNumberError)}</div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':(areaOf(state.tab)==='public'?publicScreen():({home,matches,courts,bracket,ranking,manage,ops_checkin:receptionSection,ops_close:()=>operationsPlaceholder('ops_close')})[state.tab]());$('screen').innerHTML=top+secondaryNavigation()+content+'<footer>v10開発プレビュー｜V9画面デザインを踏襲</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.section;render();if(state.tab==='ops_checkin')refreshReceptionCheckins();window.scrollTo(0,0)});document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));document.querySelectorAll('[data-official-confirm]').forEach(b=>b.onclick=()=>confirmOfficial(b.dataset.officialConfirm));document.querySelectorAll('[data-official-revoke]').forEach(b=>b.onclick=()=>revokeOfficial(b.dataset.officialRevoke));document.querySelectorAll('[data-ranking-approve]').forEach(b=>b.onclick=()=>approveRanking(b.dataset.rankingApprove));document.querySelectorAll('[data-ranking-revoke]').forEach(b=>b.onclick=()=>revokeRanking(b.dataset.rankingRevoke));document.querySelectorAll('[data-ranking-resolve]').forEach(b=>b.onclick=()=>resolveRankingModal(b.dataset.rankingResolve));wireControls();document.querySelectorAll('[data-prep-page]').forEach(b=>b.onclick=()=>{prepPage=b.dataset.prepPage;if(prepPage==='publish')clearPublishState();render();window.scrollTo(0,0)});if(state.tab==='matches'){
+function render(){if(areaOf(state.tab)==='ops'&&!state.staff)state.tab='public_home';if(state.tab==='manage'&&!canOpenManage())state.tab='public_home';navbar();let top=`<div class="notice blue"><div class="row"><b>Supabase v10 共有データ</b><button class="btn secondary mini-btn" id="reload">更新</button></div><div class="auth-inline tabs-note">${state.auth?`<span>ログイン：${esc(state.auth.email||'')}</span><button class="btn secondary mini-btn" id="logout">ログアウト</button>`:`<span>閲覧モード</span><button class="btn secondary mini-btn" id="login">スタッフログイン</button>`}${state.auth&&!state.staff?'<span class="prompt">スタッフ権限の確認待ち／権限なし</span>':''}</div></div>`;if(state.matchNumberError)top+=`<div class="notice">試合番号を取得できない項目があります。更新してください：${esc(state.matchNumberError)}</div>`;let content=state.error?`<div class="empty-error">${esc(state.error)}</div>`:state.loading?'<div class="card">Supabaseからデータを取得中です…</div>':(areaOf(state.tab)==='public'?publicScreen():({home,matches,courts,bracket,ranking,manage,ops_checkin:receptionSection,ops_permissions:permissionDiagnosticSection,ops_close:()=>operationsPlaceholder('ops_close')})[state.tab]());$('screen').innerHTML=top+secondaryNavigation()+content+'<footer>v10開発プレビュー｜V9画面デザインを踏襲</footer>';$('reload').onclick=loadData;const login=$('login'),logout=$('logout');if(login)login.onclick=loginModal;if(logout)logout.onclick=signOut;document.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.section;render();if(state.tab==='ops_checkin')refreshReceptionCheckins();window.scrollTo(0,0)});document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.goto;render()});document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));document.querySelectorAll('[data-official-confirm]').forEach(b=>b.onclick=()=>confirmOfficial(b.dataset.officialConfirm));document.querySelectorAll('[data-official-revoke]').forEach(b=>b.onclick=()=>revokeOfficial(b.dataset.officialRevoke));document.querySelectorAll('[data-ranking-approve]').forEach(b=>b.onclick=()=>approveRanking(b.dataset.rankingApprove));document.querySelectorAll('[data-ranking-revoke]').forEach(b=>b.onclick=()=>revokeRanking(b.dataset.rankingRevoke));document.querySelectorAll('[data-ranking-resolve]').forEach(b=>b.onclick=()=>resolveRankingModal(b.dataset.rankingResolve));wireControls();const permissionTournament=$('permissionTournament');if(permissionTournament)permissionTournament.onchange=()=>{permissionDiagnostic.tournamentId=permissionTournament.value;permissionDiagnostic.rows=[];permissionDiagnostic.message='';permissionDiagnostic.checkedAt='';render()};const permissionRun=$('runPermissionDiagnostic');if(permissionRun)permissionRun.onclick=runPermissionDiagnostic;document.querySelectorAll('[data-prep-page]').forEach(b=>b.onclick=()=>{prepPage=b.dataset.prepPage;if(prepPage==='publish')clearPublishState();render();window.scrollTo(0,0)});if(state.tab==='matches'){
  const search=$('matchNumberSearch'),pending=$('pendingMatchesOnly'),clear=$('clearMatchSearch');
  if(search)search.oninput=()=>{matchListFilter.query=search.value;updateMatchListResults()};
  if(pending)pending.onchange=()=>{matchListFilter.pendingOnly=pending.checked;updateMatchListResults()};
@@ -2197,7 +2245,7 @@ function loginModal(){modal(`<div class="row"><h2 style="margin:0">スタッフ�
 async function refreshAuth(){
  if(!client)return;
  const {data,error}=await client.auth.getUser();const user=error?null:data.user||null;
- matchNumberLoadVersion++;state.matchNumbers={};state.matchNumberError='';state.auth=user;state.staff=false;state.staffError='';state.systemAdmin=false;state.systemAdminLoaded=false;state.systemAdminError='';state.tournamentAdminIds=[];state.tournamentStaffIds=[];state.tournamentAdminLoaded=false;state.tournamentAdminError='';
+ permissionDiagnostic.rows=[];permissionDiagnostic.message='';permissionDiagnostic.checkedAt='';matchNumberLoadVersion++;state.matchNumbers={};state.matchNumberError='';state.auth=user;state.staff=false;state.staffError='';state.systemAdmin=false;state.systemAdminLoaded=false;state.systemAdminError='';state.tournamentAdminIds=[];state.tournamentStaffIds=[];state.tournamentAdminLoaded=false;state.tournamentAdminError='';
  if(user){
   const [roleResult,adminResult,staffResult]=await Promise.all([
    client.from('staff_users').select('user_id').eq('user_id',user.id).eq('is_active',true).maybeSingle(),
