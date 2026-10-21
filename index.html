@@ -570,10 +570,13 @@ const officialLocked=categoryId=>!state.officialLoaded||!!state.officialError||o
 // For preliminary results, require a successful qualifier-lock read before editing.
 const preliminaryEditLocked=m=>stageFor(m)?.stage_type==='preliminary'&&(!state.qualificationLocksLoaded||!!state.qualificationLocksError||state.qualificationLocks.includes(m.category_id));
 const scoreEditLocked=m=>officialLocked(m.category_id)||preliminaryEditLocked(m);
+// Third-place is round 2 match 2, but is NOT the championship final.
+const thirdPlaceIdForStage=stageId=>state.stages.find(s=>s.id===stageId)?.settings?.third_place?.match_id||null;
+const isThirdPlaceMatch=m=>!!m&&m.id===thirdPlaceIdForStage(m.stage_id);
 const calculatedFinal=slots=>{
  if(!slots.length)return null;
  const highest=Math.max(...slots.map(s=>Number(s.round_number)));
- const finals=slots.filter(s=>Number(s.round_number)===highest&&s.next_slot_id==null);
+ const finals=slots.filter(s=>Number(s.round_number)===highest&&s.next_slot_id==null&&!isThirdPlaceMatch(state.matches.find(m=>m.id===s.match_id)));
  if(finals.length!==1)return null;
  const m=state.matches.find(x=>x.id===finals[0].match_id);
  if(!m||!m.pair_a_id||!m.pair_b_id)return null;
@@ -921,16 +924,16 @@ function provisionalFinalSection(t,categories){
  const qualifiers=groups.size*Number(c.qualifiers_per_group||0);
  const topN=Number(c.qualifiers_per_group);
  const selected=groups.size===2&&groups.has('A')&&groups.has('B')&&[1,2].includes(topN)&&c.final_format==='knockout';
- const expectedFinals=topN===2?3:1;
- const finalLabel=topN===2?'準決勝2試合＋決勝1試合':'決勝1試合';
+ const expectedFinals=topN===2?4:1;
+ const finalLabel=topN===2?'準決勝2試合＋決勝1試合＋3位決定戦1試合':'決勝1試合';
  const eligible=!!client&&t.status==='draft'&&state.staff&&state.tournamentAdminIds.includes(t.id)&&!state.loading&&!state.error&&!state.bracketError&&!provisionalFinalUI.busy&&selected&&prelimMatches.length>0&&ms.length===prelimMatches.length&&prelimMatches.every(m=>m.pair_a_id&&m.pair_b_id)&&!knock;
  let status='';
  if(groups.size===1&&prelimMatches.length>0)status='<div class="notice blue"><b>予選が1組のため決勝は行いません。</b>予選順位を最終順位として使用します。'+(knock||finalMatches.length?' このカテゴリーには旧仕様の決勝データがあります。テストデータ整理時に削除してください。':'')+'</div>';
- else if(knock&&finalMatches.length===(Number(c.qualifiers_per_group)===2?3:1))status=`<div class="notice blue">${esc(Number(c.qualifiers_per_group)===2?'準決勝2試合＋決勝1試合':'決勝1試合')}の仮試合を確認しました。進出ペアは予選順位確定後に反映します。再生成はしません。</div>`;
+ else if(knock&&finalMatches.length===(Number(c.qualifiers_per_group)===2?(knock.settings?.third_place?4:3):1))status=`<div class="notice blue">${esc(Number(c.qualifiers_per_group)===2?(knock.settings?.third_place?'準決勝2試合＋決勝1試合＋3位決定戦1試合':'準決勝2試合＋決勝1試合（旧形式）'):'決勝1試合')}の仮試合を確認しました。進出ペアは予選順位確定後に反映します。再生成はしません。</div>`;
  else if(knock||finalMatches.length)status='<div class="notice">決勝ステージまたは決勝枠が既にあります。重複生成しません。状態は「更新」で確認してください。</div>';
  else if(!selected)status='<div class="notice">現在、決勝仮試合作成は「A組・B組の各組上位1または2ペアが進出するトーナメント」に対応しています。3組以上の決勝は後続工程で対応します。</div>';
  else if(!prelimMatches.length)status='<div class="notice">先に予選対戦表を生成してください。</div>';
- else if(selected)status=topN===2?'<div class="notice blue">準決勝①：<b>A組1位 対 B組2位</b> ／ 準決勝②：<b>B組1位 対 A組2位</b> ／ 決勝：準決勝の勝者同士。実際のペア名は予選順位確定後に反映します。</div>':'<div class="notice blue">決勝カード：<b>A組1位 対 B組1位</b>。実際のペア名は予選順位確定後に反映します。</div>'; 
+ else if(selected)status=topN===2?'<div class="notice blue">準決勝①：<b>A組1位 対 B組2位</b> ／ 準決勝②：<b>B組1位 対 A組2位</b> ／ 決勝：準決勝の勝者同士 ／ 3位決定戦：準決勝の敗者同士。実際のペア名は予選順位確定後に反映します。</div>':'<div class="notice blue">決勝カード：<b>A組1位 対 B組1位</b>。実際のペア名は予選順位確定後に反映します。</div>'; 
  const button=(selected&&!knock&&!finalMatches.length)?`<button type="button" class="btn wide" id="createProvisionalFinal" ${eligible?'':'disabled'}>${provisionalFinalUI.busy?'保存中…':`決勝の仮試合${expectedFinals}件を作成して保存`}</button>`:'';
  return `<h2>決勝の仮対戦表</h2><div class="card stack"><div><label for="provisionalFinalCategory">対象カテゴリー</label><select class="field" id="provisionalFinalCategory">${categories.map(x=>opt(x.id,x.name,c.id)).join('')}</select></div><p class="prompt">決勝方式：${esc(c.final_format==='knockout'?'トーナメント':c.final_format==='round_robin'?'総当たり':'未設定')} ／ 予選組数：${groups.size} ／ 進出予定：${qualifiers}ペア ／ 予選試合：${prelimMatches.length}件 ／ 決勝試合：${finalMatches.length}件</p>${status}${button}${provisionalFinalUI.message?`<div role="status" class="${provisionalFinalUI.ok?'notice blue':'empty-error'}">${esc(provisionalFinalUI.message)}</div>`:''}<p class="prompt">保存時はサーバーで権限・大会状態・予選組・既存試合を再確認します。既存予選試合・試合時刻・コートには触れません。</p></div>`;
 }
@@ -941,8 +944,8 @@ async function createProvisionalFinal(){
  if(!t||!c||t.status!=='draft'||!state.tournamentAdminIds.includes(tid)||!state.staff)return;
  const activeGroups=new Set(state.pairs.filter(p=>p.category_id===cid&&p.participation_status==='active'&&p.group_name).map(p=>p.group_name));
  if(activeGroups.size!==2||!activeGroups.has('A')||!activeGroups.has('B')||![1,2].includes(Number(c.qualifiers_per_group))||c.final_format!=='knockout'){provisionalFinalUI.message='現在はA組・B組の各組上位1または2ペアが進む決勝のみ作成できます。';provisionalFinalUI.ok=false;render();return;}
- const topN=Number(c.qualifiers_per_group),expectedFinals=topN===2?3:1;
- const summary=topN===2?'準決勝① A組1位 対 B組2位 ／ 準決勝② B組1位 対 A組2位 ／ 決勝1試合':'決勝 A組1位 対 B組1位';
+ const topN=Number(c.qualifiers_per_group),expectedFinals=topN===2?4:1;
+ const summary=topN===2?'準決勝① A組1位 対 B組2位 ／ 準決勝② B組1位 対 A組2位 ／ 決勝1試合 ／ 3位決定戦1試合':'決勝 A組1位 対 B組1位';
  if(!confirm(`「${c.name}」の仮試合${expectedFinals}件を作成しますか？\n${summary}\n予選試合と既存時間割は変更しません。`))return;
  provisionalFinalUI.busy=true;provisionalFinalUI.message='';render();let attempted=false;
  try{
@@ -960,6 +963,7 @@ async function createProvisionalFinal(){
   const st=state.stages.find(s=>s.category_id===cid&&s.stage_type==='knockout');
   const matches=state.matches.filter(m=>m.stage_id===st?.id);
   if(state.error||matches.length!==expectedFinals||!matches.some(m=>m.id===data)||matches.some(m=>m.pair_a_id||m.pair_b_id||m.status!=='scheduled'||m.start_time||m.court_id))throw Error('DB保存後の照合ができません。');
+  if(topN===2){const meta=st?.settings?.third_place;const slots=state.bracketSlots.filter(x=>x.stage_id===st.id);if(!meta||!matches.some(x=>x.id===meta.match_id)||slots.length!==4||!slots.some(x=>x.match_id===meta.match_id&&Number(x.round_number)===2&&Number(x.match_number)===2))throw Error('3位決定戦の保存結果を確認できません。');}
   provisionalFinalUI.ok=true;provisionalFinalUI.message=`決勝仮試合を保存し、Supabaseで${expectedFinals}試合を照合しました。`;
  }catch(e){provisionalFinalUI.ok=false;provisionalFinalUI.message='保存結果を確認できませんでした：'+e.message+(attempted?'。再送信せず「更新」で確認してください。':'。保存処理は開始していません。');}
  finally{provisionalFinalUI.busy=false;render();}
@@ -1563,7 +1567,7 @@ function realScheduleSection(t){
   const plan=realSchedulePreview(t),{rows,pending,begin,deadline,total,courts,duration}=plan;
   const complete=!pending.length,canSave=scheduleSaveEligible(t,plan);
   const reason=complete?(t.status!=='draft'?'下書き大会のみ保存できます。':!state.tournamentAdminIds.includes(t.id)?'大会管理者権限が確認できません。':'保存条件を確認できません。更新してください。'):'未配置試合があるため保存できません。';
-  body=`<div class="metrics"><div class="metric"><small>仮配置</small><strong>${rows.length}/${total}</strong></div><div class="metric"><small>公式コート</small><strong>${courts.length}面</strong></div><div class="metric"><small>未配置</small><strong>${pending.length}</strong></div></div><div class="notice ${complete?'blue':''}">${complete?'全試合を仮配置できました。重複・休憩・連戦の独立チェックも通過しました。':'全試合を配置できませんでした。時間枠や試合条件をご確認ください。'} 保存操作をするまでDBは変更されません。</div><p class="prompt">試合開始可能 ${minuteClock(begin)} ／ 終了期限 ${minuteClock(deadline)} ／ 1試合 ${duration}分 ／ 最終仮終了 ${rows.length?minuteClock(Math.max(...rows.map(r=>r.end))):'—'}</p><div class="tablebox"><table class="tbl"><thead><tr><th>開始〜終了</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${minuteClock(r.start)}〜${minuteClock(r.end)}</td><td>${esc(r.court.name)}</td><td>${esc(catName(r.match.category_id))}・${esc(r.match.group_name||'—')}組</td><td>${esc(pairName(r.match.pair_a_id))} 対 ${esc(pairName(r.match.pair_b_id))}</td></tr>`).join('')||'<tr><td colspan="4">仮配置なし</td></tr>'}</tbody></table></div><button type="button" class="btn wide" id="saveRealSchedule" ${canSave?'':'disabled'}>${realScheduleSave.busy?'保存・照合中…':'時間割を正式保存（全試合一括）'}</button>${!canSave?`<p class="prompt">保存できない理由：${esc(reason)}</p>`:''}`;
+  body=`<div class="metrics"><div class="metric"><small>仮配置</small><strong>${rows.length}/${total}</strong></div><div class="metric"><small>公式コート</small><strong>${courts.length}面</strong></div><div class="metric"><small>未配置</small><strong>${pending.length}</strong></div></div><div class="notice ${complete?'blue':''}">${complete?'全試合を仮配置できました。重複・休憩・連戦の独立チェックも通過しました。':'全試合を配置できませんでした。時間枠や試合条件をご確認ください。'} 保存操作をするまでDBは変更されません。</div><p class="prompt">試合開始可能 ${minuteClock(begin)} ／ 終了期限 ${minuteClock(deadline)} ／ 1試合 ${duration}分 ／ 最終仮終了 ${rows.length?minuteClock(Math.max(...rows.map(r=>r.end))):'—'}</p><div class="tablebox"><table class="tbl"><thead><tr><th>開始〜終了</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${minuteClock(r.start)}〜${minuteClock(r.end)}</td><td>${esc(r.court.name)}</td><td>${esc(catName(r.match.category_id))}・${esc(stageFor(r.match)?.stage_type==='knockout'?(isThirdPlaceMatch(r.match)?'3位決定戦':(state.bracketSlots.find(bs=>bs.match_id===r.match.id)?.round_number===2?'決勝':'準決勝')):(r.match.group_name||'—')+'組')}</td><td>${esc(pairName(r.match.pair_a_id))} 対 ${esc(pairName(r.match.pair_b_id))}</td></tr>`).join('')||'<tr><td colspan="4">仮配置なし</td></tr>'}</tbody></table></div><button type="button" class="btn wide" id="saveRealSchedule" ${canSave?'':'disabled'}>${realScheduleSave.busy?'保存・照合中…':'時間割を正式保存（全試合一括）'}</button>${!canSave?`<p class="prompt">保存できない理由：${esc(reason)}</p>`:''}`;
  }catch(e){body=`<div class="notice">${esc(e.message)}</div>`;}
  return `<h2>実試合の時間割</h2><div class="notice blue">既存の試合IDを使い、公式コートを大会全体で共有します。開始後90分と終了前60分は運営用に確保。正式保存は大会管理者のみ・初回1回限りです。</div><div class="card stack">${body}${realScheduleSave.message?`<div class="${realScheduleSave.ok?'notice blue':'empty-error'}" role="status">${esc(realScheduleSave.message)}</div>`:''}<p class="prompt">仮配置は簡易探索です。サーバー側で選手・時間帯・連戦・カテゴリー上限を再検証します。サーバーが拒否した場合は保存しません。決勝仮試合は予選終了後、ラウンド順に配置します。当日欠場による自動再編成は行いません。</p></div>`;
 }
@@ -1975,7 +1979,7 @@ function slotDiagram(slots,cat,stage){
     if(!m)return `<div class="bracket-match" style="left:${x}px;top:${y}px"><small>試合情報を取得できません</small></div>`;
     const winner=isWalkover(m)?m.walkover_winner_pair_id:isDone(m)?(m.score_a>m.score_b?m.pair_a_id:m.pair_b_id):null;
     const line=(id,score)=>`<div class="bracket-team ${winner&&winner===id?'win':''}"><span title="${esc(pairName(id))}">${esc(pairName(id))}</span><b>${score??''}</b></div>`;
-    const label=s.round_number===highest?'決勝':s.round_number===highest-1?'準決勝':`${s.round_number}回戦`;
+    const label=isThirdPlaceMatch(m)?'3位決定戦':s.round_number===highest?'決勝':s.round_number===highest-1?'準決勝':`${s.round_number}回戦`;
     return `<div class="bracket-match ${s.round_number===highest&&winner?'final-winner':''}" style="left:${x}px;top:${y}px"><div class="bracket-head"><span>${matchCode(m)?`<b class="match-number">${esc(matchCode(m))}</b> ／ `:''}${esc(label)} ${s.match_number}</span><span>${isWalkover(m)?'不戦勝':isDone(m)?'終了':m.status==='playing'?'試合中':'予定'}</span></div>${line(m.pair_a_id,m.score_a)}${line(m.pair_b_id,m.score_b)}${state.staff&&!officialLocked(m.category_id)&&m.pair_a_id&&m.pair_b_id?`<button class="btn secondary" data-edit="${esc(m.id)}">結果を操作</button>`:''}</div>`;
   }).join('');
   return `<div class="bracket-legend"><span>緑：勝者</span><span>線：次ラウンドへの接続</span><span>横スクロールで全ラウンド表示</span></div><div class="bracket-scroller"><div class="bracket-board" style="width:${boardWidth}px;height:${boardHeight}px"><svg class="bracket-lines" width="${boardWidth}" height="${boardHeight}" viewBox="0 0 ${boardWidth} ${boardHeight}" aria-hidden="true">${path}</svg>${cards}</div></div>`;
@@ -1983,7 +1987,7 @@ function slotDiagram(slots,cat,stage){
 function championSummary(slots) {
   if (!slots.length) return '';
   const lastRound=Math.max(...slots.map(s=>Number(s.round_number)));
-  const finalSlots=slots.filter(s=>Number(s.round_number)===lastRound);
+  const finalSlots=slots.filter(s=>Number(s.round_number)===lastRound&&!isThirdPlaceMatch(state.matches.find(m=>m.id===s.match_id)));
   // Only a single final establishes one bracket champion; otherwise avoid false claims.
   if (finalSlots.length!==1) return '';
   const finalMatch=state.matches.find(m=>m.id===finalSlots[0].match_id);
