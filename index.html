@@ -1922,11 +1922,11 @@ async function confirmKnockoutQualifiers(categoryId){
   if(groups.length<1||expected<2)throw Error('決勝進出人数が不足しています。');
   const [candidateResult,bracketResult,authResult]=await Promise.all([
    client.rpc('get_knockout_qualification_candidates',{p_stage_id:stage.id}),
-   client.from('knockout_brackets').select('id,stage_id').eq('stage_id',stage.id),
+   client.rpc('get_staff_knockout_qualification_locks'),
    client.auth.getUser()
   ]);
   if(candidateResult.error||bracketResult.error||authResult.error)throw Error(candidateResult.error?.message||bracketResult.error?.message||authResult.error?.message);
-  if(authResult.data?.user?.id!==state.auth?.id||bracketResult.data?.length)throw Error('ログイン状態が変わったか、決勝進出者がすでに確定されています。');
+  if(authResult.data?.user?.id!==state.auth?.id||(bracketResult.data||[]).some(x=>x.category_id===categoryId))throw Error('ログイン状態が変わったか、決勝進出者がすでに確定されています。');
   const candidates=candidateResult.data||[];
   if(candidates.length!==expected||new Set(candidates.map(p=>p.pair_id)).size!==expected||candidates.some(p=>p.tie_requires_review||!p.pair_id||!p.seed_rank||!state.pairs.some(x=>x.id===p.pair_id&&x.category_id===categoryId&&x.participation_status==='active')))throw Error('候補数・同順位・有効ペアに問題があります。順位を確認してください。');
   const ordered=candidates.slice().sort((a,b)=>Number(a.seed_rank)-Number(b.seed_rank));
@@ -1939,21 +1939,20 @@ async function confirmKnockoutQualifiers(categoryId){
   const latest=state.stages.find(s=>s.id===stage.id&&s.category_id===categoryId&&s.stage_type==='knockout');
   const tournament=state.tournaments.find(t=>t.id===tid);
   if(!latest||!['published','in_progress'].includes(tournament?.status)||!isAssignedTournamentStaff(tid)||state.qualificationLocks.includes(categoryId)||!state.qualificationLocksLoaded||state.qualificationLocksError||!state.approvedLoaded||state.approvedError||state.error||JSON.stringify(latest.settings?.qualification)!==JSON.stringify(stage.settings?.qualification))throw Error('確定直前に設定・権限・承認状態が変わりました。');
-  const [freshResult,existingResult]=await Promise.all([client.rpc('get_knockout_qualification_candidates',{p_stage_id:stage.id}),client.from('knockout_brackets').select('id').eq('stage_id',stage.id)]);
-  if(freshResult.error||existingResult.error||existingResult.data?.length)throw Error(freshResult.error?.message||existingResult.error?.message||'すでに確定されています。');
+  const [freshResult,existingResult]=await Promise.all([client.rpc('get_knockout_qualification_candidates',{p_stage_id:stage.id}),client.rpc('get_staff_knockout_qualification_locks')]);
+  if(freshResult.error||existingResult.error||(existingResult.data||[]).some(x=>x.category_id===categoryId))throw Error(freshResult.error?.message||existingResult.error?.message||'すでに確定されています。');
   const fresh=(freshResult.data||[]).slice().sort((a,b)=>Number(a.seed_rank)-Number(b.seed_rank));
   if(fresh.length!==expected||fresh.some(x=>x.tie_requires_review)||JSON.stringify(fresh.map(x=>[x.pair_id,x.group_name,x.preliminary_rank,x.seed_rank]))!==signature)throw Error('進出候補が確認時から変わりました。');
   attempted=true;
   const {data:bracketId,error:rpcError}=await client.rpc('staff_confirm_knockout_qualifiers',{p_stage_id:stage.id});
   if(rpcError)throw Error(rpcError.message);
   if(!bracketId)throw Error('保存結果のIDを受け取れませんでした。');
-  const [verifiedBracket,verifiedPairs]=await Promise.all([client.from('knockout_brackets').select('id,stage_id,status').eq('id',bracketId).single(),client.from('knockout_qualifiers').select('bracket_id,pair_id,group_name,preliminary_rank,seed_rank').eq('bracket_id',bracketId)]);
-  if(verifiedBracket.error||verifiedPairs.error||verifiedBracket.data?.stage_id!==stage.id||verifiedBracket.data?.status!=='confirmed')throw Error('決勝進出者の保存後照合に失敗しました。');
-  const actual=(verifiedPairs.data||[]).slice().sort((a,b)=>Number(a.seed_rank)-Number(b.seed_rank));
-  if(actual.length!==expected||actual.some((p,i)=>p.pair_id!==ordered[i].pair_id||p.group_name!==ordered[i].group_name||Number(p.preliminary_rank)!==Number(ordered[i].preliminary_rank)||Number(p.seed_rank)!==i+1))throw Error('保存された進出者が確認内容と一致しません。');
+  // The confirm RPC performs atomic candidate validation and returns the created bracket ID.
+  // Do not directly read restricted knockout tables from the browser.
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(bracketId)))throw Error('確定IDの形式を確認できませんでした。');
   await loadData();
   if(state.error||!state.qualificationLocksLoaded||!state.qualificationLocks.includes(categoryId))throw Error('確定状態の再取得に失敗しました。');
-  qualifierUi.ok=true;qualifierUi.message=`決勝進出者 ${expected}ペアを確定し、Supabaseの保存内容を照合しました。`;
+  qualifierUi.ok=true;qualifierUi.message=`決勝進出者 ${expected}ペアを確定しました。確定IDとサーバーの確定状態を確認しました。`;
  }catch(e){qualifierUi.ok=false;qualifierUi.message='決勝進出者の確定を確認できませんでした：'+e.message+(attempted?'。保存済みの可能性があります。再度押さず「更新」で確認してください。':'。保存操作は実行していません。');}
  finally{qualifierUi.busy=false;render();}
 }
