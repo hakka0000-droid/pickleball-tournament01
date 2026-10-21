@@ -967,7 +967,8 @@ function realSchedulePreview(t){
 
 // STEP 246: read-only preview of one-pair withdrawal before any match begins.
 // No RPC, no write, and no automatic confirmation of a withdrawal.
-const withdrawalShiftPreviewState={pairId:''};
+const withdrawalShiftPreviewState={pairId:'',reason:'当日開始前の参加辞退',busy:false,message:'',ok:false};
+const WITHDRAWAL_CONFIRM_TEST_TOURNAMENT='9a3f5dc1-382b-43ec-9705-66510a3225d2';
 function withdrawalShiftPlan(t,pairId){
  if(!t||!pairId)throw Error('大会とキャンセル候補を選択してください。');
  if(state.loading||state.error||state.courtLoadError)throw Error('最新の大会データを取得してください。');
@@ -1035,6 +1036,99 @@ function withdrawalShiftPlan(t,pairId){
  }
  return {cancelled,changes,blocked,remaining:retained.length};
 }
+// STEP 250: test-tournament-only, fail-closed atomic confirmation.
+function withdrawalConfirmationAllowed(t,plan){
+ const now=Date.now();
+ const event=String(t?.event_date||'').slice(0,10);
+ const start=String(t?.start_time||'').slice(0,5);
+ const eventStart=/^\d{4}-\d{2}-\d{2}$/.test(event)&&/^\d{2}:\d{2}$/.test(start)
+  ?Date.parse(`${event}T${start}:00+09:00`):NaN;
+ return !!client&&t?.id===WITHDRAWAL_CONFIRM_TEST_TOURNAMENT&&t.status==='draft'
+  &&Number.isFinite(eventStart)&&now<eventStart
+  &&!!state.auth&&state.staff&&state.tournamentAdminLoaded&&!state.tournamentAdminError
+  &&state.tournamentAdminIds.includes(t.id)&&!state.loading&&!state.error&&!state.courtLoadError
+  &&!withdrawalShiftPreviewState.busy&&!!plan&&plan.remaining>0;
+}
+function withdrawalConfirmationAssignments(t,plan){
+ const changes=new Map(plan.changes.map(x=>[x.m.id,x]));
+ const all=tournamentMatches(t.id),excluded=new Set(plan.cancelled.map(m=>m.id));
+ const result=all.filter(m=>!excluded.has(m.id)).map(m=>{
+  const move=changes.get(m.id);
+  return {match_id:m.id,court_id:m.court_id,
+   start_time:move?jstSnapshotTime(new Date(move.newAt).toISOString()):jstSnapshotTime(m.start_time)};
+ });
+ if(result.length!==plan.remaining||new Set(result.map(a=>a.match_id)).size!==result.length)
+  throw Error('再編成対象試合に重複または不足があります。');
+ return result;
+}
+function withdrawalConfirmationSnapshot(matches){
+ return matches.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(m=>({
+  match_id:m.id,status:m.status,pair_a_id:m.pair_a_id,pair_b_id:m.pair_b_id,
+  court_id:m.court_id??null,start_time:m.start_time??null,updated_at:m.updated_at
+ }));
+}
+async function confirmWithdrawalSchedule(){
+ const ui=withdrawalShiftPreviewState;
+ if(ui.busy)return;
+ const tid=categoryForm.tournamentId,pairId=ui.pairId;
+ const t=state.tournaments.find(x=>x.id===tid);
+ let plan,assignments;
+ try{plan=withdrawalShiftPlan(t,pairId);assignments=withdrawalConfirmationAssignments(t,plan)}
+ catch(e){ui.ok=false;ui.message='確定できません：'+e.message;render();return;}
+ if(!withdrawalConfirmationAllowed(t,plan))return;
+ const pair=state.pairs.find(p=>p.id===pairId);
+ const reason=ui.reason.trim();
+ if(!reason||reason.length>500){ui.ok=false;ui.message='キャンセル理由を1〜500文字で入力してください。';render();return;}
+ const signature=scheduleFingerprint(tid),expected=new Map(assignments.map(x=>[x.match_id,x]));
+ const details=plan.changes.map(x=>`${matchCode(x.m)||x.m.id.slice(0,8)}：${new Date(x.oldAt).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'})} → ${new Date(x.newAt).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'})}`).join('\n');
+ if(!confirm(`【テスト大会限定】取り消せないキャンセルを確定しますか？\n大会：${t.name}\nペア：${pair.display_name}\n理由：${reason}\n不戦勝等：${plan.cancelled.length}試合\n残り：${plan.remaining}試合\n繰り上げ：${plan.changes.length}試合\n${details||'繰り上げなし（時間割維持）'}\n\nこれはテストではなくSupabaseへ実際に保存されます。`))return;
+ ui.busy=true;ui.ok=false;ui.message='';render();let attempted=false;
+ try{
+  await loadData();
+  if(state.error||state.courtLoadError||categoryForm.tournamentId!==tid||ui.pairId!==pairId||scheduleFingerprint(tid)!==signature)
+   throw Error('確認後に大会データが変更されました。新しいプレビューを確認してください。');
+  const currentT=state.tournaments.find(x=>x.id===tid);
+  const freshPlan=withdrawalShiftPlan(currentT,pairId);
+  const freshAssignments=withdrawalConfirmationAssignments(currentT,freshPlan);
+  if(!withdrawalConfirmationAllowed(currentT,freshPlan)&&!(ui.busy&&currentT?.id===WITHDRAWAL_CONFIRM_TEST_TOURNAMENT&&currentT.status==='draft'&&state.auth&&state.staff&&state.tournamentAdminIds.includes(tid)))
+   throw Error('保存条件または管理者権限を再確認できませんでした。');
+  if(freshAssignments.length!==expected.size||freshAssignments.some(a=>!expected.has(a.match_id)||expected.get(a.match_id).court_id!==a.court_id||new Date(expected.get(a.match_id).start_time).getTime()!==new Date(a.start_time).getTime()))
+   throw Error('再計算した時間割が確認時と異なります。');
+  const catIds=state.categories.filter(c=>c.tournament_id===tid).map(c=>c.id);
+  if(!catIds.length)throw Error('カテゴリーがありません。');
+  const {data:dbBefore,error:readError}=await client.from('matches')
+   .select('id,category_id,status,pair_a_id,pair_b_id,court_id,start_time,updated_at').in('category_id',catIds).order('id').limit(1001);
+  if(readError||!dbBefore||dbBefore.length!==tournamentMatches(tid).length||dbBefore.length>1000||dbBefore.some(m=>m.updated_at==null))
+   throw Error('保存前の完全な試合スナップショットを取得できませんでした。');
+  const cached=new Map(tournamentMatches(tid).map(m=>[m.id,m]));
+  if(dbBefore.some(m=>{const o=cached.get(m.id);return !o||m.status!==o.status||m.pair_a_id!==o.pair_a_id||m.pair_b_id!==o.pair_b_id||m.court_id!==o.court_id||new Date(m.start_time).getTime()!==new Date(o.start_time).getTime()||m.updated_at!==o.updated_at;}))
+   throw Error('DB上の試合が変更されています。');
+  const {data:dbPair,error:pairError}=await client.from('pairs').select('id,participation_status').eq('id',pairId).single();
+  if(pairError||dbPair?.participation_status!=='active')throw Error('キャンセル対象ペアの状態が変更されています。');
+  if(ui.reason.trim()!==reason||ui.pairId!==pairId||categoryForm.tournamentId!==tid)throw Error('確認後に入力内容が変わりました。');
+  attempted=true;
+  const {data:saved,error:rpcError}=await client.rpc('admin_confirm_withdrawal_schedule',{
+   p_tournament_id:tid,p_pair_id:pairId,p_reason:reason,p_assignments:assignments,
+   p_expected_current:withdrawalConfirmationSnapshot(dbBefore),
+   p_reorganization_start:jstSnapshotTime(new Date(Math.min(...plan.cancelled.map(m=>new Date(m.start_time).getTime()))).toISOString())
+  });
+  if(rpcError)throw Error(rpcError.message);
+  if(Number(saved)!==assignments.length)throw Error('サーバーの保存件数が一致しません。');
+  const [afterMatches,afterPair]=await Promise.all([
+   client.from('matches').select('id,category_id,status,court_id,start_time').in('category_id',catIds).limit(1001),
+   client.from('pairs').select('id,participation_status').eq('id',pairId).single()
+  ]);
+  if(afterMatches.error||afterPair.error||afterPair.data?.participation_status!=='withdrawn'||afterMatches.data?.length!==dbBefore.length)
+   throw Error('保存後のDB照合に失敗しました。');
+  const cancelled=new Set(plan.cancelled.map(x=>x.id));
+  if(afterMatches.data.some(m=>cancelled.has(m.id)?!['walkover','cancelled'].includes(m.status)||m.court_id!=null||m.start_time!=null:!expected.has(m.id)||m.status!=='scheduled'||m.court_id!==expected.get(m.id).court_id||new Date(m.start_time).getTime()!==new Date(expected.get(m.id).start_time).getTime()))
+   throw Error('保存後の不戦勝・時間割がプレビューと異なります。');
+  await loadData();
+  if(state.error||state.pairs.find(p=>p.id===pairId)?.participation_status!=='withdrawn')throw Error('保存後の画面再取得に失敗しました。');
+  ui.ok=true;ui.message=`確定完了：${pair.display_name}／不戦勝等${plan.cancelled.length}試合／繰り上げ${plan.changes.length}試合。DBを再取得して照合しました。`;
+ }catch(e){ui.ok=false;ui.message='確定結果を確認できませんでした：'+e.message+(attempted?'。保存済みの可能性があります。再実行せず「更新」でDBの状態を確認してください。':'。確定RPCは呼び出していません。');}
+ finally{ui.busy=false;render();}
+}
 function withdrawalShiftSection(t){
  if(!t||state.loading||state.error||state.courtLoadError)return '';
  const all=tournamentMatches(t.id);
@@ -1051,7 +1145,7 @@ function withdrawalShiftSection(t){
   const blockedRows=r.blocked.slice(0,30).map(x=>`<tr><td>${esc(courtName(x.courtId))} ${esc(fmt(x.at))}</td><td>${esc(matchCode(x.match)||x.match.id.slice(0,8))}</td><td>${esc(x.issue)}</td></tr>`).join('');
   result=`<div class="metrics"><div class="metric"><small>不戦勝等の対象</small><strong>${r.cancelled.length}</strong></div><div class="metric"><small>残る予定試合</small><strong>${r.remaining}</strong></div><div class="metric"><small>繰り上げ候補</small><strong>${r.changes.length}</strong></div></div><h3>繰り上げ可能な候補</h3>${moveRows?`<div class="tablebox"><table class="tbl"><thead><tr><th>試合</th><th>コート</th><th>変更前</th><th>変更後</th></tr></thead><tbody>${moveRows}</tbody></table></div>`:'<p class="notice">今回の条件では、安全に繰り上げられる試合を見つけられませんでした。空き枠を維持します。</p>'}<details><summary>移動を見送った候補・理由（${r.blocked.length}件）</summary><div class="tablebox"><table class="tbl"><thead><tr><th>空き枠</th><th>候補試合</th><th>理由</th></tr></thead><tbody>${blockedRows||'<tr><td colspan="3">なし</td></tr>'}</tbody></table></div></details>`;
  }catch(e){result=`<div class="notice">プレビューできません：${esc(e.message)}</div>`;}
- return `<div class="card stack"><h3>当日開始前・1組キャンセルの繰り上げプレビュー</h3><div class="notice blue">読み取り専用の仮計算です。棄権登録、不戦勝処理、時間割保存は一切実行しません。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。大会開始前の実施条件、公開済み大会での変更権限、DB保存時の最終チェックは後続工程で追加します。</p></div>`;
+ return `<div class="card stack"><h3>当日開始前・1組キャンセルの繰り上げプレビュー</h3><div class="notice blue">選択中のプレビューは読み取り専用です。下部の「キャンセルを確定」を押した場合のみ、テスト大会の実データを変更します。選手の休憩・連戦、コート・カテゴリー制限を仮検証します。</div><div><label for="withdrawalShiftPair">キャンセル候補ペア</label><select id="withdrawalShiftPair" class="field">${active.map(p=>opt(p.id,p.display_name,selected)).join('')}</select></div>${result}${(()=>{let plan=null;try{plan=withdrawalShiftPlan(t,selected)}catch(_e){}const enabled=withdrawalConfirmationAllowed(t,plan);return `<div class="line"></div><h3>キャンセルを確定する（テスト大会限定）</h3><div class="notice">これは実データを変更します。STEP 250では安全のため V10_TEST_一括登録（下書き・大会開始前）のみ有効です。他大会ではボタンを無効化しています。</div><label for="withdrawalConfirmReason">キャンセル理由</label><textarea class="field" id="withdrawalConfirmReason" rows=2 maxlength=500>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmWithdrawalSchedule" ${enabled?'':'disabled'}>${withdrawalShiftPreviewState.busy?'確定・照合中…':'内容を確認してキャンセルを確定（DB保存）'}</button>${!enabled?'<p class="prompt">対象テスト大会、下書き、開始前、管理者権限、完全なプレビューが必要です。</p>':''}${withdrawalShiftPreviewState.message?`<p class="${withdrawalShiftPreviewState.ok?'notice blue':'empty-error'}" role="status">${esc(withdrawalShiftPreviewState.message)}</p>`:''}`})()}<p class="prompt">同一コートの空き枠ごとに後続試合を時刻順に探索します。移動しない試合は維持します。簡易探索のため最適解は保証しません。確定保存はテスト大会の下書き・開始前に限定しています。公開済み大会への適用は別工程です。サーバー側で最終検証を行います。</p></div>`;
 }
 
 // STEP 22-6-9-139: whole-tournament fair rescheduling of draft, unplayed games.
@@ -1909,7 +2003,7 @@ function render(){if(areaOf(state.tab)==='ops'&&!state.staff)state.tab='public_h
  if(pending)pending.onchange=()=>{matchListFilter.pendingOnly=pending.checked;updateMatchListResults()};
  if(clear)clear.onclick=()=>{matchListFilter.query='';if(search){search.value='';search.focus()}updateMatchListResults()};
  updateMatchListResults();
- }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const gpc=$('groupPreviewCategory');if(gpc)gpc.onchange=()=>{groupingPreview.categoryId=gpc.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpm=$('groupPreviewMode');if(gpm)gpm.onchange=()=>{groupingPreview.mode=gpm.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpn=$('groupPreviewCount');if(gpn)gpn.onchange=()=>{groupingPreview.groupCount=gpn.value;groupingPreview.message='';render()};const gps=$('savePreliminaryGroups');if(gps)gps.onclick=savePreliminaryGroups;const dc=$('drawCategory');if(dc)dc.onchange=()=>{drawPreview.categoryId=dc.value;drawPreview.message='';render()};const dg=$('generatePreliminaryMatches');if(dg)dg.onclick=generatePreliminaryMatches;const wsp=$('withdrawalShiftPair');if(wsp)wsp.onchange=()=>{withdrawalShiftPreviewState.pairId=wsp.value;render()};const ss=$('saveRealSchedule');if(ss)ss.onclick=saveRealSchedule;const rs=$('saveReorganizedSchedule');if(rs)rs.onclick=saveReorganizedSchedule;const pubCheck=$('runPublishCheck');if(pubCheck)pubCheck.onclick=checkTournamentPublish;const pubSave=$('confirmPublishTournament');if(pubSave)pubSave.onclick=publishTournament;const printBtn=$('printTournamentSchedule');if(printBtn)printBtn.onclick=printTournament;const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;clearPublishState();categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
+ }const cf=$('createTournamentForm');if(cf){cf.onsubmit=createTournament;document.querySelectorAll('[data-nt-field]').forEach(el=>el.oninput=()=>{newTournamentDraft[el.dataset.ntField]=el.value});document.querySelectorAll('[data-nt-cat]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntCat)];if(c)c[el.dataset.ntKey]=el.value;if(el.dataset.ntKey==='division')render()});document.querySelectorAll('[data-nt-level]').forEach(el=>el.onchange=()=>{const c=newTournamentDraft.categories[Number(el.dataset.ntLevel)];if(!c)return;const j=Number(el.value);c.levels=el.checked?[...new Set([...c.levels,j])].sort((a,b)=>a-b):c.levels.filter(x=>x!==j);render()});const add=$('ntAddCategory');if(add)add.onclick=()=>{if(newTournamentDraft.categories.length>=100){alert('カテゴリーは100件までです');return;}newTournamentDraft.categories.push(newCategoryDraft());render()};document.querySelectorAll('[data-nt-remove]').forEach(el=>el.onclick=()=>{newTournamentDraft.categories.splice(Number(el.dataset.ntRemove),1);render()});}const cc=$('createCategoryForm');if(cc)cc.onsubmit=createCategory;const etf=$('eventTimeForm');if(etf)etf.onsubmit=saveEventTime;const ncf=$('numberedCourtsForm');if(ncf)ncf.onsubmit=addNumberedCourts;document.querySelectorAll('[data-window-save]').forEach(el=>el.onclick=()=>saveScheduleWindow(el.dataset.windowSave));for(const [attr,field] of [['data-window-start','start'],['data-window-end','end'],['data-window-preferred','preferred'],['data-window-max','max']])document.querySelectorAll('['+attr+']').forEach(el=>el.onchange=()=>{editScheduleWindow(categoryForm.tournamentId,el.getAttribute(attr),field,el.value);render()});document.querySelectorAll('[data-save-capacity]').forEach(el=>el.onclick=()=>saveCapacityPlan(el.dataset.saveCapacity));document.querySelectorAll('[data-plan-pairs]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planPairs,'pairs',el.value);render()});document.querySelectorAll('[data-plan-group-size]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planGroupSize,'groupSize',el.value);render()});document.querySelectorAll('[data-plan-advance]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planAdvance,'advance',el.value);render()});document.querySelectorAll('[data-plan-final-format]').forEach(el=>el.onchange=()=>{editCapacityPlan(categoryForm.tournamentId,el.dataset.planFinalFormat,'finalFormat',el.value);recruitmentOptimization.result=null;render()});const rb=$('recruitmentBuffer');if(rb)rb.onchange=()=>{recruitmentOptimization.bufferMinutes=Number(rb.value);recruitmentOptimization.result=null;render()};const ob=$('optimizeRecruitment');if(ob)ob.onclick=optimizeRecruitmentClick;const ab=$('applyRecruitmentSuggestion');if(ab)ab.onclick=applyRecruitmentSuggestion;const qm=$('qualificationMinutes');if(qm)qm.onchange=()=>{planningSimulation.qualificationMinutes=Number(qm.value);render()};const gpc=$('groupPreviewCategory');if(gpc)gpc.onchange=()=>{groupingPreview.categoryId=gpc.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpm=$('groupPreviewMode');if(gpm)gpm.onchange=()=>{groupingPreview.mode=gpm.value;groupingPreview.groupCount='';groupingPreview.message='';render()};const gpn=$('groupPreviewCount');if(gpn)gpn.onchange=()=>{groupingPreview.groupCount=gpn.value;groupingPreview.message='';render()};const gps=$('savePreliminaryGroups');if(gps)gps.onclick=savePreliminaryGroups;const dc=$('drawCategory');if(dc)dc.onchange=()=>{drawPreview.categoryId=dc.value;drawPreview.message='';render()};const dg=$('generatePreliminaryMatches');if(dg)dg.onclick=generatePreliminaryMatches;const wsp=$('withdrawalShiftPair');if(wsp)wsp.onchange=()=>{withdrawalShiftPreviewState.pairId=wsp.value;withdrawalShiftPreviewState.message='';render()};const wcr=$('withdrawalConfirmReason');if(wcr)wcr.oninput=()=>{withdrawalShiftPreviewState.reason=wcr.value};const wcs=$('confirmWithdrawalSchedule');if(wcs)wcs.onclick=confirmWithdrawalSchedule;const ss=$('saveRealSchedule');if(ss)ss.onclick=saveRealSchedule;const rs=$('saveReorganizedSchedule');if(rs)rs.onclick=saveReorganizedSchedule;const pubCheck=$('runPublishCheck');if(pubCheck)pubCheck.onclick=checkTournamentPublish;const pubSave=$('confirmPublishTournament');if(pubSave)pubSave.onclick=publishTournament;const printBtn=$('printTournamentSchedule');if(printBtn)printBtn.onclick=printTournament;const ct=$('manageTournament');if(ct)ct.onchange=()=>{if(ct.value==='__create_new__'){prepCreatingTournament=true;prepPage='basic';}else{prepCreatingTournament=false;categoryForm.tournamentId=ct.value;clearPublishState();categoryForm.selectedLevels=[1];categoryForm.displayOrder=0;}render()};document.querySelectorAll('[data-category-level]').forEach(x=>x.onchange=()=>{const i=Number(x.dataset.categoryLevel);categoryForm.selectedLevels=x.checked?[...new Set([...categoryForm.selectedLevels,i])].sort((a,b)=>a-b):categoryForm.selectedLevels.filter(v=>v!==i);render()});const cd=$('categoryDivision');if(cd)cd.onchange=()=>{categoryForm.division=cd.value;render()};const co=$('categoryDisplayOrder');if(co)co.onchange=()=>{categoryForm.displayOrder=co.value;render()};const pit=$('pairImportTournament');if(pit)pit.onchange=()=>{pairImport.tournamentId=pit.value;pairImport.rows=[];pairImport.fileName='';pairImport.fileErrors=[];pairImport.message='';render()};const pif=$('pairImportFile');if(pif)pif.onchange=()=>{if(pif.files?.[0])readPairImportFile(pif.files[0])};const ptd=$('pairTemplateDownload');if(ptd)ptd.onclick=downloadPairImportTemplate;const pis=$('pairImportSubmit');if(pis)pis.onclick=submitPairImport;const pmt=$('pairManageTournament');if(pmt)pmt.onchange=()=>{pairManage.tournamentId=pmt.value;pairManage.message='';render()};const pma=$('pairManageAdd');if(pma)pma.onclick=()=>pairManageModal('add');document.querySelectorAll('[data-pair-update]').forEach(b=>b.onclick=()=>pairManageModal('update',b.dataset.pairUpdate));document.querySelectorAll('[data-pair-delete]').forEach(b=>b.onclick=()=>pairManageModal('delete',b.dataset.pairDelete));let pf=$('pairFilter');if(pf)pf.onchange=()=>{state.pair=pf.value;render()}}
 async function fetchAll(name,columns='*',order='id'){let out=[],from=0;for(;;){let q=client.from(name).select(columns).range(from,from+499);if(order)q=q.order(order,{ascending:true});let {data,error}=await q;if(error)throw Error(name+' : '+error.message);out.push(...(data||[]));if(!data||data.length<500)break;from+=500;if(from>=10000)throw Error(name+' : 10000行超のため取得を停止しました')}return out}
 let matchNumberLoadVersion=0;
 async function refreshMatchNumbers(){
