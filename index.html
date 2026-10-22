@@ -1906,7 +1906,7 @@ function printTournament(){
        const m=fixtureByPair.get([i,j].sort((x,y)=>x-y).join('|'));
        return `<td class="write-score"><span class="match-num">${m?matchCodeText(m):'未登録'}</span><span class="score-blank">＿＿ - ＿＿</span></td>`;
      }).join('')}<td class="summary-cell"></td><td class="summary-cell"></td></tr>`).join('');
-     const finalTable=`<table class="league final-league"><thead><tr><th class="rowhead">ペア</th>${seeds.map((seed,i)=>`<th>${i+1}<small>${esc(seed)}</small></th>`).join('')}<th class="summary-head">勝敗</th><th class="summary-head">順位</th></tr></thead><tbody>${finalMatrix}</tbody></table>`;
+     const finalTable=`<table class="league final-league"><thead><tr><th class="rowhead">ペア</th>${seeds.map((seed,i)=>`<th>${i+1}<small>${esc(seed)}</small>${finalNames[i]===seed?'<small style="display:block">氏名：＿＿＿＿＿＿＿＿</small>':''}</th>`).join('')}<th class="summary-head">勝敗</th><th class="summary-head">順位</th></tr></thead><tbody>${finalMatrix}</tbody></table>`;
      knockoutSheets.push(`<section class="sheet"><div class="group-banner" style="background:#eae2f8;border-top:4px solid #7856ad"><h2>${esc(c.name)} ／ 決勝総当たりリーグ表</h2><p>3ペア ／ 3試合</p></div>${finalTable}<p class="league-notes">各試合は対称な2マスに同じ試合番号を表示します。両方のマスに「自ペアの得点 - 相手ペアの得点」を記入します。例：A対Bが11-8ならA行B列に11-8、B行A列に8-11。勝敗・順位は集計後に記入してください。</p></section>`);
      continue;
    }
