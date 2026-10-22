@@ -2534,10 +2534,10 @@ async function submitPairImport(){
 }
 // STEP 294: Individual pair management; all mutations go through server-side administrator RPCs.
 const pairManage={tournamentId:'',busy:false,message:'',ok:false};
-function pairPublishedNameAllowed(tid){
+function pairPublishedNameAllowed(tid,allowBusy=false){
  const t=state.tournaments.find(x=>x.id===tid);
  const start=t?.event_date&&t?.start_time?Date.parse(String(t.event_date).slice(0,10)+'T'+String(t.start_time).slice(0,5)+':00+09:00'):NaN;
- return !!client&&!state.loading&&!pairManage.busy&&!state.error&&canManageCategories()&&state.tournamentAdminIds.includes(tid)&&t?.status==='published'&&Number.isFinite(start)&&Date.now()<start;
+ return !!client&&!state.loading&&(allowBusy||!pairManage.busy)&&!state.error&&canManageCategories()&&state.tournamentAdminIds.includes(tid)&&t?.status==='published'&&Number.isFinite(start)&&Date.now()<start;
 }
 function pairManageAllowed(tid){
  const t=state.tournaments.find(x=>x.id===tid);
@@ -2612,7 +2612,7 @@ function pairManageModal(mode,pairId){
     if(freshPair.error||freshTournament.error||!freshPair.data||!freshTournament.data)throw Error('保存前の最新情報を取得できません。');
     const current=freshPair.data,nowT=freshTournament.data;
     if(current.category_id!==p.category_id||current.player1!==p.player1||current.player2!==p.player2||Number(current.female_count)!==Number(p.female_count)||current.participation_status!=='active'||current.group_name!==p.group_name)throw Error('ペア情報が変更されています。画面を更新してください。');
-    if(nowT.status!=='published'||nowT.event_date!==tournament.event_date||String(nowT.start_time).slice(0,5)!==String(tournament.start_time).slice(0,5)||!pairPublishedNameAllowed(tid))throw Error('大会状態または開始日時が変更されました。');
+    if(nowT.status!=='published'||nowT.event_date!==tournament.event_date||String(nowT.start_time).slice(0,5)!==String(tournament.start_time).slice(0,5)||!pairPublishedNameAllowed(tid,true))throw Error('大会状態または開始日時が変更されました。');
    }
    const rpc=deleting?'admin_delete_pair':editing?'admin_update_pair':'admin_register_pair';
    const args=deleting?{p_pair_id:p.id}:editing?{p_pair_id:p.id,p_player1:values.p1,p_player2:values.p2,p_female_count:values.female}:{p_category_id:catId,p_player1:values.p1,p_player2:values.p2,p_female_count:values.female};
