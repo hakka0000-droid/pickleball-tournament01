@@ -1098,16 +1098,24 @@ function realSchedulePreview(t){
       for(const round of rounds){
         const matchGroup=bracketSlots.filter(x=>Number(x.slot.round_number)===round).sort((a,b)=>Number(a.slot.match_number)-Number(b.slot.match_number));
         let roundLastEnd=previousEnd;
+        // 3-finalist round robin: every match shares a finalist with every other.
+        // Even though pair IDs are placeholders until rankings are approved,
+        // schedule the three fixtures sequentially, respecting minimum rest.
+        const stage=stageFor(matchGroup[0]?.m);
+        const isThreePairRoundRobin=stage?.settings?.provisional_layout_version==='three_groups_top1_round_robin_v1';
+        let lastRoundRobinEnd=null;
         for(const {m} of matchGroup){
           const w=windowMap.get(categoryId);
           let placed=false;
           for(let at=begin;at+duration<=deadline;at+=duration){
             if(at<previousEnd+rest||at<w.start||at+duration>w.end)continue;
+            if(isThreePairRoundRobin&&lastRoundRobinEnd!==null&&at<lastRoundRobinEnd+rest)continue;
             const overlapping=rows.filter(r=>r.start<at+duration&&at<r.end);
             if(overlapping.filter(r=>r.match.category_id===categoryId).length>=w.max)continue;
             const court=courts.find(c=>!overlapping.some(r=>r.court.id===c.id));
             if(!court)continue;
             rows.push({match:m,court,start:at,end:at+duration,persons:[]});
+            if(isThreePairRoundRobin)lastRoundRobinEnd=at+duration;
             roundLastEnd=Math.max(roundLastEnd,at+duration);
             placed=true;
             break;
