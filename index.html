@@ -213,25 +213,40 @@ async function saveCapacityPlan(categoryId){
  const tid=categoryForm.tournamentId,key=planKey(tid,categoryId);
  const tournament=state.tournaments.find(t=>t.id===tid);
  const category=state.categories.find(c=>c.id===categoryId&&c.tournament_id===tid);
- if(!client||!category||tournament?.status!=='draft'||!canManageCategories()||!state.tournamentAdminIds.includes(tid)||capacityPlanSaving.has(key))return;
+ if(!client||!category||!['draft','published'].includes(tournament?.status)||!canManageCategories()||!state.tournamentAdminIds.includes(tid)||capacityPlanSaving.has(key))return;
+ const published=tournament.status==='published';
  const plan=getCapacityPlan(tid,categoryId);
  const values={pairs:Number(plan.pairs),groupSize:Number(plan.groupSize),advance:Number(plan.advance),finalFormat:plan.finalFormat};
- if(!planGroupings(values.pairs,values.advance,values.groupSize,values.finalFormat)){
-  capacityPlanMessages[key]={ok:false,text:'募集ペア数と予選・決勝条件が正しくありません。'};render();return;
+ if(!Number.isInteger(values.pairs)||values.pairs<3||values.pairs>64||(!published&&!planGroupings(values.pairs,values.advance,values.groupSize,values.finalFormat))){
+  capacityPlanMessages[key]={ok:false,text:'募集上限は3〜64ペアの整数で指定してください。下書きの場合は組分け条件も確認してください。'};render();return;
  }
- if(!confirm(`「${category.name}」の募集枠を保存しますか？\n募集 ${values.pairs}ペア／1組最大 ${values.groupSize}ペア／各組上位 ${values.advance}ペア／決勝 ${values.finalFormat==='knockout'?'トーナメント':'総当たり'}\nこのカテゴリーのみ保存します。`))return;
+ if(published&&(values.groupSize!==Number(category.preliminary_group_max_pairs)||values.advance!==Number(category.qualifiers_per_group)||values.finalFormat!==category.final_format)){
+  capacityPlanMessages[key]={ok:false,text:'公開後は募集上限以外の設定を変更できません。「更新」でDB値を確認してください。'};render();return;
+ }
+ if(!confirm(published?`「${category.name}」の募集上限を ${category.planned_pairs} → ${values.pairs} ペアに変更しますか？\n登録ペア・予選組分け・対戦表・時間割は変更しません。`: `「${category.name}」の募集枠を保存しますか？\n募集 ${values.pairs}ペア／1組最大 ${values.groupSize}ペア／各組上位 ${values.advance}ペア／決勝 ${values.finalFormat==='knockout'?'トーナメント':'総当たり'}\nこのカテゴリーのみ保存します。`))return;
  capacityPlanSaving.add(key);delete capacityPlanMessages[key];render();
  try{
+  if(published){
+   // Fail closed on stale tournament/category data and capacity below current participants.
+   const [freshTournament,freshCategory,freshPairs]=await Promise.all([
+    client.from('tournaments').select('id,status').eq('id',tid).single(),
+    client.from('categories').select('id,tournament_id,planned_pairs,preliminary_group_max_pairs,qualifiers_per_group,final_format').eq('id',categoryId).single(),
+    client.from('pairs').select('id').eq('category_id',categoryId).eq('participation_status','active')
+   ]);
+   if(freshTournament.error||freshCategory.error||freshPairs.error||!freshTournament.data||!freshCategory.data||!freshPairs.data)throw Error('最新の大会・カテゴリー・参加ペアを確認できません。');
+   const db=freshCategory.data;
+   if(freshTournament.data.status!=='published'||db.tournament_id!==tid||db.planned_pairs!==category.planned_pairs||db.preliminary_group_max_pairs!==category.preliminary_group_max_pairs||db.qualifiers_per_group!==category.qualifiers_per_group||db.final_format!==category.final_format)throw Error('公開状態または募集設定が変更されました。画面を更新してください。');
+   if(values.pairs<freshPairs.data.length)throw Error(`登録済みの有効ペア ${freshPairs.data.length} 組より小さい募集上限にはできません。`);
+   if(categoryForm.tournamentId!==tid||getCapacityPlan(tid,categoryId).pairs!==plan.pairs)throw Error('入力内容が変更されました。');
+  }
   const {error}=await client.rpc('admin_save_category_recruitment_plan',{p_category_id:categoryId,p_planned_pairs:values.pairs,p_group_max_pairs:values.groupSize,p_qualifiers_per_group:values.advance,p_final_format:values.finalFormat});
   if(error)throw error;
   const {data,error:verifyError}=await client.from('categories').select('id,tournament_id,planned_pairs,preliminary_group_max_pairs,qualifiers_per_group,final_format').eq('id',categoryId).single();
   if(verifyError||!data||data.tournament_id!==tid||data.planned_pairs!==values.pairs||data.preliminary_group_max_pairs!==values.groupSize||data.qualifiers_per_group!==values.advance||data.final_format!==values.finalFormat)throw Error('RPC実行後のDB照合ができませんでした');
   Object.assign(category,data);
-  // A user may change a field during an in-flight save: keep that unsaved edit.
-  const current=getCapacityPlan(tid,categoryId);
   if(capacityPlanMatchesSaved(tid,categoryId))capacityPlanDirty.delete(key);
   else capacityPlanDirty.add(key);
-  capacityPlanMessages[key]={ok:true,text:'保存済み：Supabaseから4項目を再取得して照合しました。'};
+  capacityPlanMessages[key]={ok:true,text:published?'募集上限のみ保存済み。DBの4項目を再取得して照合しました。対戦表・時間割は変更していません。':'保存済み：Supabaseから4項目を再取得して照合しました。'};
  }catch(e){capacityPlanMessages[key]={ok:false,text:'保存結果を確認できませんでした：'+e.message+'。再保存の前に「更新」でDBの値を確認してください。'};}
  finally{capacityPlanSaving.delete(key);render();}
 }
@@ -438,9 +453,11 @@ function capacityPlanningSection(t,categories,availableSlots){
   const key=planKey(t.id,c.id),saving=capacityPlanSaving.has(key),dirty=capacityPlanDirty.has(key)&&!capacityPlanMatchesSaved(t.id,c.id);
   const saved=[c.planned_pairs,c.preliminary_group_max_pairs,c.qualifiers_per_group,c.final_format].every(v=>v!==null&&v!==undefined);
   const status=dirty?'未保存の変更あり':saved?'DBに保存済み':'未保存（初期値）';
-  const canSave=t.status==='draft'&&state.staff&&state.tournamentAdminIds.includes(t.id)&&!!result&&!saving&&!state.loading;
-  return `<div class="card stack"><h3>${esc(c.name)}</h3><div class="grid"><div><label for="planPairs-${esc(c.id)}">募集ペア数（3〜64）</label><input id="planPairs-${esc(c.id)}" class="field" type="number" min="3" max="64" step="1" inputmode="numeric" data-plan-pairs="${esc(c.id)}" value="${esc(plan.pairs)}"><p class="prompt">推奨：${counts.join('・')}ペア</p></div><div><label for="planGroupSize-${esc(c.id)}">1グループの最大ペア数（全組共通）</label><select id="planGroupSize-${esc(c.id)}" class="field" data-plan-group-size="${esc(c.id)}">${[3,4,5,6].map(n=>opt(String(n),`${n}ペア`,plan.groupSize)).join('')}</select></div><div><label for="planAdvance-${esc(c.id)}">各予選組の決勝進出数</label><select id="planAdvance-${esc(c.id)}" class="field" data-plan-advance="${esc(c.id)}">${opt('1','上位1ペア',plan.advance)}${opt('2','上位2ペア',plan.advance)}</select></div><div><label for="planFinalFormat-${esc(c.id)}">決勝形式</label><select id="planFinalFormat-${esc(c.id)}" class="field" data-plan-final-format="${esc(c.id)}">${opt('knockout','シングルエリミネーション',plan.finalFormat||'knockout')}${opt('round_robin','総当たり（1回戦）',plan.finalFormat||'knockout')}</select></div></div>${result?`<p class="prompt">予選リーグ：${esc(result.sizes.join('・'))}ペア（${result.sizes.length}組）</p><div class="row"><span>予選 ${result.preliminary}試合 ＋ 決勝（${result.finalFormat==='round_robin'?'総当たり':'シングルエリミネーション'}）${result.knockout}試合</span><b>${result.total}試合</b></div>${result.sizes.length===1?'<p class="prompt">予選1組のため決勝は行いません。</p>':''}`:'<div class="empty-error">選択した最大ペア数では全組3ペア以上に均等配分できません。募集ペア数かグループ人数を変更してください。</div>'}<div class="row" style="flex-wrap:wrap"><span class="status ${dirty?'pending':saved?'done':''}">${esc(status)}</span><button class="btn mini-btn" data-save-capacity="${esc(c.id)}" ${canSave?'':'disabled'}>${saving?'保存中…':'このカテゴリーの募集枠を保存'}</button></div>${capacityPlanMessages[key]?`<p class="${capacityPlanMessages[key].ok?'notice blue':'empty-error'}" role="status">${esc(capacityPlanMessages[key].text)}</p>`:''}${t.status!=='draft'?'<p class="prompt">下書き以外の大会では保存できません。</p>':''}</div>`;
+  const published=t.status==='published';
+  const canSave=['draft','published'].includes(t.status)&&state.staff&&state.tournamentAdminIds.includes(t.id)&&(published||!!result)&&!saving&&!state.loading&&!state.error&&!state.tournamentAdminError;
+  return `<div class="card stack"><h3>${esc(c.name)}</h3><div class="grid"><div><label for="planPairs-${esc(c.id)}">募集ペア数（3〜64）</label><input id="planPairs-${esc(c.id)}" class="field" type="number" min="3" max="64" step="1" inputmode="numeric" data-plan-pairs="${esc(c.id)}" value="${esc(plan.pairs)}"><p class="prompt">推奨：${counts.join('・')}ペア</p></div><div><label for="planGroupSize-${esc(c.id)}">1グループの最大ペア数（全組共通）</label><select id="planGroupSize-${esc(c.id)}" class="field" data-plan-group-size="${esc(c.id)}" ${published?'disabled':''}>${[3,4,5,6].map(n=>opt(String(n),`${n}ペア`,plan.groupSize)).join('')}</select></div><div><label for="planAdvance-${esc(c.id)}">各予選組の決勝進出数</label><select id="planAdvance-${esc(c.id)}" class="field" data-plan-advance="${esc(c.id)}" ${published?'disabled':''}>${opt('1','上位1ペア',plan.advance)}${opt('2','上位2ペア',plan.advance)}</select></div><div><label for="planFinalFormat-${esc(c.id)}">決勝形式</label><select id="planFinalFormat-${esc(c.id)}" class="field" data-plan-final-format="${esc(c.id)}" ${published?'disabled':''}>${opt('knockout','シングルエリミネーション',plan.finalFormat||'knockout')}${opt('round_robin','総当たり（1回戦）',plan.finalFormat||'knockout')}</select></div></div>${published?'<p class="notice blue">公開済み大会：募集上限だけ編集できます。参加ペア数・対戦表・時間割は変わりません。組人数・進出人数・決勝方式の変更は、別工程で安全な再生成機能を実装してから対応します。</p>':''}${!published&&result?`<p class="prompt">予選リーグ：${esc(result.sizes.join('・'))}ペア（${result.sizes.length}組）</p><div class="row"><span>予選 ${result.preliminary}試合 ＋ 決勝（${result.finalFormat==='round_robin'?'総当たり':'シングルエリミネーション'}）${result.knockout}試合</span><b>${result.total}試合</b></div>${result.sizes.length===1?'<p class="prompt">予選1組のため決勝は行いません。</p>':''}`:'<div class="empty-error">選択した最大ペア数では全組3ペア以上に均等配分できません。募集ペア数かグループ人数を変更してください。</div>'}<div class="row" style="flex-wrap:wrap"><span class="status ${dirty?'pending':saved?'done':''}">${esc(status)}</span><button class="btn mini-btn" data-save-capacity="${esc(c.id)}" ${canSave?'':'disabled'}>${saving?'保存中…':'このカテゴリーの募集枠を保存'}</button></div>${capacityPlanMessages[key]?`<p class="${capacityPlanMessages[key].ok?'notice blue':'empty-error'}" role="status">${esc(capacityPlanMessages[key].text)}</p>`:''}${!['draft','published'].includes(t.status)?'<p class="prompt">この大会状態では募集上限を変更できません。</p>':''}</div>`;
  });
+ if(t.status==='published')return `<h2>公開後の募集上限変更</h2><div class="notice blue">ここでは募集の上限値だけ保存します。新たな参加ペアの登録や試合・時間割の再生成は行いません。</div>${cards.join('')}`;
  const results=categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return planGroupings(p.pairs,p.advance,p.groupSize,p.finalFormat||'knockout')});
  const valid=categories.length>0&&results.every(Boolean);
  const required=valid?results.reduce((sum,r)=>sum+r.total,0):null;
