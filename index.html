@@ -2534,6 +2534,11 @@ async function submitPairImport(){
 }
 // STEP 294: Individual pair management; all mutations go through server-side administrator RPCs.
 const pairManage={tournamentId:'',busy:false,message:'',ok:false};
+function pairPublishedNameAllowed(tid){
+ const t=state.tournaments.find(x=>x.id===tid);
+ const start=t?.event_date&&t?.start_time?Date.parse(String(t.event_date).slice(0,10)+'T'+String(t.start_time).slice(0,5)+':00+09:00'):NaN;
+ return !!client&&!state.loading&&!pairManage.busy&&!state.error&&canManageCategories()&&state.tournamentAdminIds.includes(tid)&&t?.status==='published'&&Number.isFinite(start)&&Date.now()<start;
+}
 function pairManageAllowed(tid){
  const t=state.tournaments.find(x=>x.id===tid);
  return !!client&&!state.loading&&!pairManage.busy&&canManageCategories()&&state.tournamentAdminIds.includes(tid)&&t?.status==='draft';
@@ -2552,12 +2557,12 @@ function pairManageSection(){
  if(!allowed.some(t=>t.id===pairManage.tournamentId))pairManage.tournamentId=allowed.find(t=>t.status==='draft')?.id||allowed[0].id;
  const tid=pairManage.tournamentId,t=allowed.find(x=>x.id===tid);
  const cats=state.categories.filter(c=>c.tournament_id===tid).sort((a,b)=>(a.display_order??0)-(b.display_order??0)||a.name.localeCompare(b.name,'ja'));
- const editable=pairManageAllowed(tid),list=state.pairs.filter(p=>cats.some(c=>c.id===p.category_id));
+ const editable=pairManageAllowed(tid),nameOnly=pairPublishedNameAllowed(tid),list=state.pairs.filter(p=>cats.some(c=>c.id===p.category_id));
  const lines=cats.map(c=>{
   const ps=list.filter(p=>p.category_id===c.id),locked=pairManageProtected(c.id);
-  return `<div class="card"><div class="row"><h3>${esc(c.name)}</h3><span class="status ${locked?'pending':'done'}">${locked?'編集・削除不可':'編集可能'}／${ps.length}ペア</span></div>${ps.length?`<div class="tablebox"><table class="tbl"><thead><tr><th>ペア</th><th>女性選手数</th><th>参加状態</th><th>操作</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${esc(p.display_name)}</td><td>${esc(p.female_count)}</td><td>${esc(p.participation_status)}</td><td><button class="btn secondary mini-btn" data-pair-update="${esc(p.id)}" ${editable&&!locked?'':'disabled'}>編集</button> <button class="btn secondary mini-btn" data-pair-delete="${esc(p.id)}" ${editable&&!locked?'':'disabled'}>削除</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="prompt">登録済みペアはありません。</p>'}</div>`;
+  return `<div class="card"><div class="row"><h3>${esc(c.name)}</h3><span class="status">${ps.length}ペア</span></div>${ps.length?`<div class="tablebox"><table class="tbl"><thead><tr><th>ペア</th><th>女性選手数</th><th>参加状態</th><th>操作</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${esc(p.display_name)}</td><td>${esc(p.female_count)}</td><td>${esc(p.participation_status)}</td><td><button class="btn secondary mini-btn" data-pair-update="${esc(p.id)}" ${(editable&&!locked)||(nameOnly&&p.participation_status==='active')?'':'disabled'}>${nameOnly?'名前修正':'編集'}</button> ${nameOnly?'':`<button class="btn secondary mini-btn" data-pair-delete="${esc(p.id)}" ${editable&&!locked?'':'disabled'}>削除</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="prompt">登録済みペアはありません。</p>'}</div>`;
  }).join('');
- return `<h2>参加ペアの個別管理（管理者用）</h2><div class="card stack"><div><label for="pairManageTournament">操作対象の大会</label><select id="pairManageTournament" class="field" ${pairManage.busy?'disabled':''}>${allowed.map(x=>opt(x.id,x.name,tid)).join('')}</select></div>${t?.status!=='draft'?'<div class="notice">下書き以外の大会は操作できません。</div>':''}<button class="btn wide" id="pairManageAdd" ${editable&&cats.some(c=>!pairManageProtected(c.id))?'':'disabled'}>ペアを1組追加</button><p class="prompt">編集・削除は対象カテゴリーに試合・確定データがない場合だけ実行できます。サーバーでも再検証します。削除は取り消せません。</p>${pairManage.message?`<div class="${pairManage.ok?'notice blue':'empty-error'}" role="status">${esc(pairManage.message)}</div>`:''}</div>${lines||'<div class="notice">カテゴリーがありません。</div>'}`;
+ return `<h2>参加ペアの個別管理（管理者用）</h2><div class="card stack"><div><label for="pairManageTournament">操作対象の大会</label><select id="pairManageTournament" class="field" ${pairManage.busy?'disabled':''}>${allowed.map(x=>opt(x.id,x.name,tid)).join('')}</select></div>${nameOnly?'<div class="notice blue">公開後・大会開始前：有効ペアの選手名の誤字訂正のみ可能です。女性選手数・参加状態・組分け・対戦表・時間割は変更しません。進行済み試合がある場合はDBが拒否します。</div>':t?.status!=='draft'?'<div class="notice">この大会ではペア情報を編集できません。</div>':''}<button class="btn wide" id="pairManageAdd" ${editable&&cats.some(c=>!pairManageProtected(c.id))?'':'disabled'}>ペアを1組追加</button><p class="prompt">追加・削除は下書きで競技データがない場合のみ可能です。公開後の名前修正は開始前に限ります。</p>${pairManage.message?`<div class="${pairManage.ok?'notice blue':'empty-error'}" role="status">${esc(pairManage.message)}</div>`:''}</div>${lines||'<div class="notice">カテゴリーがありません。</div>'}`;
 }
 function pairManageValues(){
  const p1=$('pairManagePlayer1')?.value.trim()||'',p2=$('pairManagePlayer2')?.value.trim()||'';
@@ -2572,22 +2577,24 @@ function pairManageModal(mode,pairId){
  const editing=mode==='update',deleting=mode==='delete',p=pairId?state.pairs.find(x=>x.id===pairId):null;
  if((editing||deleting)&&!p)return;
  const tid=editing||deleting?state.categories.find(c=>c.id===p.category_id)?.tournament_id:pairManage.tournamentId;
- if(!pairManageAllowed(tid))return;
+ const publishedEdit=editing&&pairPublishedNameAllowed(tid);
+ if(!pairManageAllowed(tid)&&!publishedEdit)return;
  const cats=state.categories.filter(c=>c.tournament_id===tid&&!pairManageProtected(c.id));
- if((editing||deleting)&&!cats.some(c=>c.id===p.category_id))return;
- if(!cats.length)return;
+ if((editing||deleting)&&!cats.some(c=>c.id===p.category_id)&&!publishedEdit)return;
+ if(publishedEdit&&p.participation_status!=='active')return;
+ if(!cats.length&&!publishedEdit)return;
  const tournament=state.tournaments.find(t=>t.id===tid),category=state.categories.find(c=>c.id===p?.category_id);
- const title=deleting?'ペアを削除':editing?'ペアを編集':'ペアを1組追加';
+ const title=deleting?'ペアを削除':publishedEdit?'公開後の選手名修正':editing?'ペアを編集':'ペアを1組追加';
  const categoryInput=editing||deleting?`<p><b>カテゴリー：</b>${esc(category?.name)}</p>`:`<label for="pairManageCategory">カテゴリー</label><select class="field" id="pairManageCategory">${cats.map(c=>opt(c.id,c.name,cats[0].id)).join('')}</select>`;
- const fields=deleting?`<p><b>${esc(p.display_name)}</b></p><div class="notice">このペアをDBから削除します。操作後は元に戻せません。</div>`:`<label for="pairManagePlayer1">選手1</label><input class="field" id="pairManagePlayer1" maxlength="100" value="${esc(p?.player1||'')}" autocomplete="off"><label for="pairManagePlayer2">選手2</label><input class="field" id="pairManagePlayer2" maxlength="100" value="${esc(p?.player2||'')}" autocomplete="off"><label for="pairManageFemale">女性選手数</label><select class="field" id="pairManageFemale">${[0,1,2].map(n=>opt(String(n),String(n),String(p?.female_count??0))).join('')}</select>`;
- modal(`<div class="row"><h2 style="margin:0">${title}</h2><button class="btn secondary mini-btn" data-close>閉じる</button></div><p class="prompt">大会：${esc(tournament?.name||'')}</p>${categoryInput}${fields}<p class="empty-error hide" id="pairManageMsg" role="alert"></p><button class="btn wide" id="pairManageSave">${deleting?'このペアを削除':editing?'変更を保存':'1組追加して保存'}</button>`);
+ const fields=deleting?`<p><b>${esc(p.display_name)}</b></p><div class="notice">このペアをDBから削除します。操作後は元に戻せません。</div>`:`<label for="pairManagePlayer1">選手1</label><input class="field" id="pairManagePlayer1" maxlength="100" value="${esc(p?.player1||'')}" autocomplete="off"><label for="pairManagePlayer2">選手2</label><input class="field" id="pairManagePlayer2" maxlength="100" value="${esc(p?.player2||'')}" autocomplete="off"><label for="pairManageFemale">女性選手数${publishedEdit?'（変更不可）':''}</label><select class="field" id="pairManageFemale" ${publishedEdit?'disabled':''}>${[0,1,2].map(n=>opt(String(n),String(n),String(p?.female_count??0))).join('')}</select>`;
+ modal(`<div class="row"><h2 style="margin:0">${title}</h2><button class="btn secondary mini-btn" data-close>閉じる</button></div><p class="prompt">大会：${esc(tournament?.name||'')}</p>${categoryInput}${fields}${publishedEdit?'<p class="notice blue">選手名だけ修正します。女性人数・対戦表・時間割は変更しません。</p>':''}<p class="empty-error hide" id="pairManageMsg" role="alert"></p><button class="btn wide" id="pairManageSave">${deleting?'このペアを削除':editing?'変更を保存':'1組追加して保存'}</button>`);
  $('pairManageSave').onclick=async()=>{
   const msg=$('pairManageMsg'),btn=$('pairManageSave');
   const fail=text=>{if(msg){msg.textContent=text;msg.classList.remove('hide');}};
-  if(!pairManageAllowed(tid)){fail('大会の管理権限または下書き状態を確認できません。');return;}
+  if(!pairManageAllowed(tid)&&!(publishedEdit&&pairPublishedNameAllowed(tid))){fail('大会の管理権限、公開状態または開催日時を確認できません。');return;}
   const catId=p?.category_id||$('pairManageCategory')?.value;
-  if(!cats.some(c=>c.id===catId)||pairManageProtected(catId)){fail('このカテゴリーには編集できないデータがあるか、確認情報を取得できません。更新してください。');return;}
-  let values;try{if(!deleting)values=pairManageValues();}catch(e){fail(e.message);return;}
+  if((!cats.some(c=>c.id===catId)||pairManageProtected(catId))&&!publishedEdit){fail('このカテゴリーには編集できないデータがあるか、確認情報を取得できません。更新してください。');return;}
+  let values;try{if(!deleting)values=pairManageValues();if(publishedEdit&&values.female!==Number(p.female_count))throw Error('女性選手数は変更できません。');}catch(e){fail(e.message);return;}
   if(!deleting){
    const key=normalizePairKey(values.p1,values.p2);
    if(state.pairs.some(other=>other.category_id===catId&&other.id!==p?.id&&normalizePairKey(other.player1,other.player2)===key)){fail('同じカテゴリーに同じ2名のペアが既に存在します。');return;}
@@ -2595,10 +2602,18 @@ function pairManageModal(mode,pairId){
     if(cat?.planned_pairs==null||active>=Number(cat.planned_pairs)){fail('募集枠が未設定、または上限に達しています。');return;}
    }
   }
-  const action=deleting?'削除':editing?'変更':'追加';
+  if(publishedEdit&&values.p1===p.player1&&values.p2===p.player2){fail('選手名に変更がありません。');return;}
+  const action=deleting?'削除':publishedEdit?'名前修正':editing?'変更':'追加';
   if(!confirm(`「${tournament?.name}」／「${catName(catId)}」のペアを${action}しますか？\n${deleting?p.display_name:values.p1+' / '+values.p2}${deleting?'\n削除は元に戻せません。':''}`))return;
   btn.disabled=true;pairManage.busy=true;
   try{
+   if(publishedEdit){
+    const [freshPair,freshTournament]=await Promise.all([client.from('pairs').select('id,category_id,player1,player2,female_count,participation_status,group_name').eq('id',p.id).single(),client.from('tournaments').select('id,status,event_date,start_time').eq('id',tid).single()]);
+    if(freshPair.error||freshTournament.error||!freshPair.data||!freshTournament.data)throw Error('保存前の最新情報を取得できません。');
+    const current=freshPair.data,nowT=freshTournament.data;
+    if(current.category_id!==p.category_id||current.player1!==p.player1||current.player2!==p.player2||Number(current.female_count)!==Number(p.female_count)||current.participation_status!=='active'||current.group_name!==p.group_name)throw Error('ペア情報が変更されています。画面を更新してください。');
+    if(nowT.status!=='published'||nowT.event_date!==tournament.event_date||String(nowT.start_time).slice(0,5)!==String(tournament.start_time).slice(0,5)||!pairPublishedNameAllowed(tid))throw Error('大会状態または開始日時が変更されました。');
+   }
    const rpc=deleting?'admin_delete_pair':editing?'admin_update_pair':'admin_register_pair';
    const args=deleting?{p_pair_id:p.id}:editing?{p_pair_id:p.id,p_player1:values.p1,p_player2:values.p2,p_female_count:values.female}:{p_category_id:catId,p_player1:values.p1,p_player2:values.p2,p_female_count:values.female};
    const {data,error}=await client.rpc(rpc,args);if(error)throw error;
