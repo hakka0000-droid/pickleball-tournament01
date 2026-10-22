@@ -2077,6 +2077,65 @@ function printTournament(){
 }
 </style></head><body><div class="toolbar"><button onclick="window.print()">印刷する / PDFとして保存</button></div>${headings}<h2 class="page-title">コート別時間割（${ms.length}試合）</h2><p class="legend">時間帯を縦、コートを横に表示。カテゴリーと組の色はリーグ表にも共通です。スコアはリーグ表に記入してください。</p>${schedule}${others}${groupSheets.join('')}${knockoutSheets.join('')}</body></html>`;
  popup.document.open();popup.document.write(doc);popup.document.close();
+ // Step 390: paginate the printed timetable by actual rendered row heights.
+ // A new table starts at each page; individual time rows are never split.
+ const printDoc=popup.document;
+ const printStyle=printDoc.createElement('style');
+ printStyle.textContent=`
+ @media screen{body{width:273mm;margin:0 auto}}
+ .timetable-page.schedule-chunk{break-inside:avoid!important;page-break-inside:avoid!important}
+ .timetable-page.schedule-chunk+.timetable-page.schedule-chunk{break-before:page!important;page-break-before:always!important}
+ @media print{
+  .timetable-page.schedule-chunk{break-inside:avoid!important;page-break-inside:avoid!important}
+  .timetable-page.schedule-chunk+.timetable-page.schedule-chunk{break-before:page!important;page-break-before:always!important}
+  .schedule tbody tr{break-inside:avoid!important;page-break-inside:avoid!important}
+  .schedule td.schedule-filled{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+ }`;
+ printDoc.head.appendChild(printStyle);
+ const paginatePrintedSchedule=()=>{
+   const first=printDoc.querySelector('.timetable-page');
+   if(!first||first.dataset.paginated==='yes')return;
+   const firstTable=first.querySelector('table.schedule');
+   if(!firstTable)return;
+   const body=firstTable.tBodies[0];
+   const rows=Array.from(body.rows);
+   if(!rows.length)return;
+   // A4 landscape printable height: 210 - 24 = 186 mm. Leave 9 mm
+   // tolerance for Safari print rounding and browser page decorations.
+   const pageHeight=(186-9)*96/25.4;
+   const headH=firstTable.tHead.getBoundingClientRect().height;
+   const firstTop=firstTable.getBoundingClientRect().top-printDoc.body.getBoundingClientRect().top;
+   const rowHeights=rows.map(row=>Math.ceil(row.getBoundingClientRect().height)+2);
+   const totalFirst=pageHeight-firstTop-headH-8;
+   const totalNext=pageHeight-headH-12;
+   if(totalFirst<50||totalNext<50)return;
+   first.classList.add('schedule-chunk');
+   first.dataset.paginated='yes';
+   let chunk=first,tbody=body,remaining=totalFirst;
+   for(let i=0;i<rows.length;i++){
+     const row=rows[i],h=rowHeights[i];
+     if(i>0&&h>remaining){
+       const previousChunk=chunk;
+       chunk=printDoc.createElement('section');
+       chunk.className='timetable-page schedule-chunk';
+       const table=firstTable.cloneNode(false);
+       table.appendChild(firstTable.tHead.cloneNode(true));
+       tbody=printDoc.createElement('tbody');
+       table.appendChild(tbody);
+       chunk.appendChild(table);
+       first.parentNode.insertBefore(chunk,previousChunk.nextSibling);
+       remaining=totalNext;
+     }
+     tbody.appendChild(row);
+     remaining-=h;
+   }
+ };
+ const finishPrintLayout=()=>{
+   if(printDoc.fonts&&printDoc.fonts.ready){printDoc.fonts.ready.then(paginatePrintedSchedule).catch(paginatePrintedSchedule);}
+   else paginatePrintedSchedule();
+ };
+ if(printDoc.readyState==='complete')finishPrintLayout();
+ else popup.addEventListener('load',finishPrintLayout,{once:true});
 }
 
 function manage(){
