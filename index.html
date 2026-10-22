@@ -53,6 +53,16 @@
 .tablebox .tbl { width:max-content; min-width:100%; }
 .prompt, .notice, .empty-error { overflow-wrap:anywhere; }
 @media(max-width:759px){ .tablebox .tbl th,.tablebox .tbl td{padding:9px 8px} }
+
+/* Step 379: show schedule edit actions without horizontal scrolling on phones. */
+.saved-schedule-mobile{display:none}
+@media(max-width:759px){
+ .saved-schedule-desktop{display:none}
+ .saved-schedule-mobile{display:grid;gap:9px}
+ .saved-schedule-item{border:1px solid #dce6ea;border-radius:11px;padding:12px;background:#fff;min-width:0}
+ .saved-schedule-item .btn{display:block;width:100%;margin-top:10px}
+ .saved-schedule-item .mini{overflow-wrap:anywhere}
+}
 </style></head>
 <body>
 <header><div class="inner"><div class="authline"><span class="tag">Supabase v10 簡素化版プレビュー</span><span class="light mini">V9デザイン踏襲</span></div><h1>Pickleball Tournament Manager</h1><small class="light">試合確認・結果入力・順位チェック</small></div></header>
@@ -1619,9 +1629,16 @@ async function saveManualScheduleEdit(){
 }
 function manualScheduleEligibleBypassBusy(t,all){const busy=manualScheduleEdit.busy;manualScheduleEdit.busy=false;try{return manualScheduleEligible(t,all)}finally{manualScheduleEdit.busy=busy}}
 function savedRealScheduleSection(t,all){
- const partial=all.some(m=>m.start_time==null||m.court_id==null),rows=all.slice().sort((a,b)=>(a.start_time||'').localeCompare(b.start_time||'')||courtName(a.court_id).localeCompare(courtName(b.court_id),'ja',{numeric:true}));
- const content=rows.map(m=>`<tr><td>${esc(m.start_time?new Date(m.start_time).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Tokyo'}):'未割当')}</td><td>${esc(courtName(m.court_id))}</td><td>${esc(catName(m.category_id))}・${esc(m.group_name||'—')}組</td><td>${esc(pairName(m.pair_a_id))} 対 ${esc(pairName(m.pair_b_id))}</td><td>${manualScheduleEligible(t,all)?`<button type="button" class="btn secondary mini-btn" data-manual-edit="${esc(m.id)}">この試合を修正</button>`:'—'}</td></tr>`).join('');
- return `<div class="notice ${partial?'':'blue'}"><b>${partial?'割当が一部不足しています。再保存は停止中です。':'DB保存済みの時間割を表示しています。'}</b> この画面からの上書き・二重保存はできません。</div><div class="metrics"><div class="metric"><small>登録済み試合</small><strong>${all.length}</strong></div><div class="metric"><small>時刻・コート割当済み</small><strong>${all.filter(m=>m.start_time&&m.court_id).length}</strong></div><div class="metric"><small>未割当</small><strong>${all.filter(m=>!m.start_time||!m.court_id).length}</strong></div></div><div class="tablebox"><table class="tbl"><thead><tr><th>開始日時</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th><th>修正</th></tr></thead><tbody>${content}</tbody></table></div>${manualScheduleEditor(t,all)}${manualScheduleEdit.message?`<div role="status" class="${manualScheduleEdit.ok?'notice blue':'empty-error'}">${esc(manualScheduleEdit.message)}</div>`:''}`;
+ const partial=all.some(m=>m.start_time==null||m.court_id==null);
+ const rows=all.slice().sort((a,b)=>(a.start_time||'').localeCompare(b.start_time||'')||courtName(a.court_id).localeCompare(courtName(b.court_id),'ja',{numeric:true}));
+ const canEdit=manualScheduleEligible(t,all);
+ const matchLabel=m=>stageFor(m)?.stage_type==='knockout'?(isThirdPlaceMatch(m)?'3位決定戦':(state.stages.find(s=>s.id===m.stage_id)?.settings?.provisional_layout_version==='three_groups_top1_round_robin_v1'?'決勝総当たり':'決勝')):((m.group_name||'—')+'組');
+ const when=m=>m.start_time?new Date(m.start_time).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Tokyo'}):'未割当';
+ const editButton=m=>canEdit?`<button type="button" class="btn secondary mini-btn" data-manual-edit="${esc(m.id)}">この試合を修正</button>`:'—';
+ const content=rows.map(m=>`<tr><td>${esc(when(m))}</td><td>${esc(courtName(m.court_id))}</td><td>${esc(catName(m.category_id))}・${esc(matchLabel(m))}</td><td>${esc(pairName(m.pair_a_id))} 対 ${esc(pairName(m.pair_b_id))}</td><td>${editButton(m)}</td></tr>`).join('');
+ const mobile=rows.map(m=>`<div class="saved-schedule-item"><div class="row"><b>${esc(matchCode(m)||'試合')}</b><span class="status">${esc(matchLabel(m))}</span></div><p style="margin:7px 0 4px"><b>${esc(when(m))}</b> ／ ${esc(courtName(m.court_id))}</p><div class="mini">${esc(catName(m.category_id))} ／ ${esc(pairName(m.pair_a_id))} 対 ${esc(pairName(m.pair_b_id))}</div>${canEdit?editButton(m):''}</div>`).join('');
+ const guidance=canEdit?'<div class="notice blue">時刻・コートを変更する場合は、下の各試合の「この試合を修正」を押してください。他の試合は変更されません。</div>':'';
+ return `<div class="notice ${partial?'':'blue'}"><b>${partial?'割当が一部不足しています。':'DB保存済みの時間割を表示しています。'}</b> 一括の再保存はできません。${canEdit?'下書き大会では個別修正できます。':''}</div><div class="metrics"><div class="metric"><small>登録済み試合</small><strong>${all.length}</strong></div><div class="metric"><small>時刻・コート割当済み</small><strong>${all.filter(m=>m.start_time&&m.court_id).length}</strong></div><div class="metric"><small>未割当</small><strong>${all.filter(m=>!m.start_time||!m.court_id).length}</strong></div></div>${guidance}<div class="tablebox saved-schedule-desktop"><table class="tbl"><thead><tr><th>開始日時</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th><th>修正</th></tr></thead><tbody>${content}</tbody></table></div><div class="saved-schedule-mobile">${mobile}</div>${manualScheduleEditor(t,all)}${manualScheduleEdit.message?`<div role="status" class="${manualScheduleEdit.ok?'notice blue':'empty-error'}">${esc(manualScheduleEdit.message)}</div>`:''}`;
 }
 function realScheduleSection(t){
  if(!t)return '<div class="notice">対象大会を選択してください。</div>';
