@@ -1568,7 +1568,7 @@ const manualScheduleEdit={matchId:'',busy:false,message:'',ok:false};
 function manualScheduleEligible(t,all){
  return !!client&&t?.status==='draft'&&!!state.auth&&state.staff&&state.tournamentAdminLoaded&&!state.tournamentAdminError
   &&state.tournamentAdminIds.includes(t.id)&&!state.loading&&!state.error&&!state.courtLoadError&&!manualScheduleEdit.busy
-  &&all.length>0&&all.every(m=>m.status==='scheduled'&&m.start_time&&m.court_id&&m.pair_a_id&&m.pair_b_id&&m.score_a==null&&m.score_b==null);
+  &&all.length>0&&all.every(m=>m.status==='scheduled'&&m.start_time&&m.court_id&&m.score_a==null&&m.score_b==null&&m.walkover_winner_pair_id==null&&((m.pair_a_id==null&&m.pair_b_id==null)||(m.pair_a_id!=null&&m.pair_b_id!=null&&m.pair_a_id!==m.pair_b_id)));
 }
 function manualScheduleEditor(t,all){
  if(!manualScheduleEligible(t,all)&&!manualScheduleEdit.busy)return `<p class="prompt">個別修正は下書き大会・全試合未開始・全試合割当済みの場合に大会管理者が利用できます。</p>`;
@@ -1576,7 +1576,7 @@ function manualScheduleEditor(t,all){
  if(!selected)return '';
  const currentTime=new Date(selected.start_time).toLocaleTimeString('en-GB',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
  const courts=state.courts.filter(c=>c.tournament_id===t.id&&c.is_active&&c.court_type==='official');
- return `<div class="card stack" id="manualScheduleEditor" tabindex="-1" style="scroll-margin-top:80px"><h3>試合の個別修正</h3><p><b>${esc(matchCode(selected)||selected.id.slice(0,8))}</b>　${esc(pairName(selected.pair_a_id))} 対 ${esc(pairName(selected.pair_b_id))}</p><p class="prompt">現在：${esc(currentTime)}／${esc(courtName(selected.court_id))}</p><div class="grid"><div><label for="manualScheduleTime">変更後の開始時刻</label><input class="field" type="time" id="manualScheduleTime" value="${esc(currentTime)}" ${manualScheduleEdit.busy?'disabled':''}></div><div><label for="manualScheduleCourt">変更後のコート</label><select class="field" id="manualScheduleCourt" ${manualScheduleEdit.busy?'disabled':''}>${courts.map(c=>opt(c.id,c.name,selected.court_id)).join('')}</select></div></div><button class="btn" id="manualScheduleSave" ${manualScheduleEdit.busy?'disabled':''}>この試合の変更を確認して保存</button><button class="btn secondary" id="manualScheduleCancel" ${manualScheduleEdit.busy?'disabled':''}>キャンセル</button><p class="prompt">他の試合の時刻とコートは変更しません。競合や休憩条件などは既存SQL関数が検証します。</p></div>`;
+ return `<div class="card stack" id="manualScheduleEditor" tabindex="-1" style="scroll-margin-top:80px"><h3>試合の個別修正</h3><p><b>${esc(matchCode(selected)||selected.id.slice(0,8))}</b>　${esc(selected.pair_a_id?pairName(selected.pair_a_id):'決勝進出後に確定')} 対 ${esc(selected.pair_b_id?pairName(selected.pair_b_id):'決勝進出後に確定')}</p><p class="prompt">現在：${esc(currentTime)}／${esc(courtName(selected.court_id))}</p><div class="grid"><div><label for="manualScheduleTime">変更後の開始時刻</label><input class="field" type="time" id="manualScheduleTime" value="${esc(currentTime)}" ${manualScheduleEdit.busy?'disabled':''}></div><div><label for="manualScheduleCourt">変更後のコート</label><select class="field" id="manualScheduleCourt" ${manualScheduleEdit.busy?'disabled':''}>${courts.map(c=>opt(c.id,c.name,selected.court_id)).join('')}</select></div></div><button class="btn" id="manualScheduleSave" ${manualScheduleEdit.busy?'disabled':''}>この試合の変更を確認して保存</button><button class="btn secondary" id="manualScheduleCancel" ${manualScheduleEdit.busy?'disabled':''}>キャンセル</button><p class="prompt">他の試合の時刻とコートは変更しません。仮決勝も修正できます。予選終了後・コート競合・既知ペアの休憩・3ペア総当たりの重複はサーバーで検証します。</p></div>`;
 }
 async function saveManualScheduleEdit(){
  if(manualScheduleEdit.busy)return;
