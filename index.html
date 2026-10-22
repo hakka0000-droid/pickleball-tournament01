@@ -973,7 +973,7 @@ function provisionalFinalSection(t,categories){
  if(groups.size===1&&prelimMatches.length>0)status='<div class="notice blue"><b>予選が1組のため決勝は行いません。</b>予選順位を最終順位として使用します。'+(knock||finalMatches.length?' このカテゴリーには旧仕様の決勝データがあります。テストデータ整理時に削除してください。':'')+'</div>';
  else if(knock&&finalMatches.length===(knock.settings?.provisional_layout_version==='four_groups_top1_semifinals_v1'?4:knock.settings?.provisional_layout_version==='three_groups_top1_bye_v1'?2:Number(c.qualifiers_per_group)===2?(knock.settings?.third_place?4:3):1))status=`<div class="notice blue">${esc(knock.settings?.provisional_layout_version==='four_groups_top1_semifinals_v1'?'準決勝2試合＋決勝1試合＋3位決定戦1試合':knock.settings?.provisional_layout_version==='three_groups_top1_bye_v1'?'準決勝1試合＋決勝1試合（A組1位はBYE）':Number(c.qualifiers_per_group)===2?(knock.settings?.third_place?'準決勝2試合＋決勝1試合＋3位決定戦1試合':'準決勝2試合＋決勝1試合（旧形式）'):'決勝1試合')}の仮試合を確認しました。進出ペアは予選順位確定後に反映します。再生成はしません。</div>`;
  else if(knock||finalMatches.length)status='<div class="notice">決勝ステージまたは決勝枠が既にあります。重複生成しません。状態は「更新」で確認してください。</div>';
- else if(!selected)status='<div class="notice">決勝進出3ペアの総当たりは別工程で対応します。現在作成できる仮試合は2ペアまたは4ペアのトーナメントです。</div>';
+ else if(!selected)status='<div class="notice">この画面で仮対戦表を作成できるのは、2組×各組1位、2組×各組上位2ペア、4組×各組1位のトーナメントです。3ペア総当たりは画面連携の確認中です。</div>';
  else if(!prelimMatches.length)status='<div class="notice">先に予選対戦表を生成してください。</div>';
  else if(selected)status=isFour?'<div class="notice blue">準決勝①：<b>A組1位 対 B組1位</b> ／ 準決勝②：<b>C組1位 対 D組1位</b> ／ 決勝：準決勝の勝者同士 ／ 3位決定戦：準決勝の敗者同士。</div>':isThree?'<div class="notice blue">準決勝：<b>B組1位 対 C組1位</b> ／ 決勝：<b>A組1位（BYE） 対 準決勝の勝者</b>。3位決定戦はありません。</div>':topN===2?'<div class="notice blue">準決勝①：<b>A組1位 対 B組2位</b> ／ 準決勝②：<b>B組1位 対 A組2位</b> ／ 決勝：準決勝の勝者同士 ／ 3位決定戦：準決勝の敗者同士。実際のペア名は予選順位確定後に反映します。</div>':'<div class="notice blue">決勝カード：<b>A組1位 対 B組1位</b>。実際のペア名は予選順位確定後に反映します。</div>'; 
  const button=(selected&&!knock&&!finalMatches.length)?`<button type="button" class="btn wide" id="createProvisionalFinal" ${eligible?'':'disabled'}>${provisionalFinalUI.busy?'保存中…':`決勝の仮試合${expectedFinals}件を作成して保存`}</button>`:'';
@@ -989,7 +989,7 @@ async function createProvisionalFinal(){
  const isFour=activeGroups.size===4&&['A','B','C','D'].every(g=>activeGroups.has(g))&&Number(c.qualifiers_per_group)===1;
  const isTwo=activeGroups.size===2&&activeGroups.has('A')&&activeGroups.has('B')&&[1,2].includes(Number(c.qualifiers_per_group));
  if(!(isTwo||isFour)||c.final_format!=='knockout'){provisionalFinalUI.message='決勝進出3ペアの総当たりは未実装です。2ペアまたは4ペアのトーナメントを選択してください。';provisionalFinalUI.ok=false;render();return;}
- const topN=Number(c.qualifiers_per_group),expectedFinals=isFour?3:isThree?2:topN===2?4:1;
+ const topN=Number(c.qualifiers_per_group),expectedFinals=isFour?4:isThree?2:topN===2?4:1;
  const summary=isFour?'準決勝① A組1位 対 B組1位 ／ 準決勝② C組1位 対 D組1位 ／ 決勝1試合 ／ 3位決定戦1試合':isThree?'準決勝 B組1位 対 C組1位 ／ 決勝 A組1位（BYE） 対 準決勝の勝者':topN===2?'準決勝① A組1位 対 B組2位 ／ 準決勝② B組1位 対 A組2位 ／ 決勝1試合 ／ 3位決定戦1試合':'決勝 A組1位 対 B組1位';
  if(!confirm(`「${c.name}」の仮試合${expectedFinals}件を作成しますか？\n${summary}\n予選試合と既存時間割は変更しません。`))return;
  provisionalFinalUI.busy=true;provisionalFinalUI.message='';render();let attempted=false;
