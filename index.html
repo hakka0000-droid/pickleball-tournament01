@@ -1837,18 +1837,9 @@ function printTournament(){
    return rankSlots[key]?.[side]||'進出者未確定';
  };
  const matchTile=m=>`<div class="game-tile" style="${styleFor(m.category_id,m.group_name,stageFor(m)?.stage_type==='knockout')}"><div class="tile-top"><b>${matchCodeText(m)}</b><b>${esc(printMatchLabel(m))}</b></div><div class="tile-category">${esc(catName(m.category_id))}</div><div class="tile-teams">${esc(printFixtureSide(m,'A'))}<span class="vs">vs</span>${esc(printFixtureSide(m,'B'))}</div></div>`;
- // Keep the timetable readable. Split only between complete time rows;
- // each continuation page repeats the time/court header.
- // Consistent A4 landscape print layout: at most five time rows per page.
- // Page count scales automatically with the actual tournament schedule.
- const timetableRowsPerPage=5;
- const timePages=[];
- for(let i=0;i<timeKeys.length;i+=timetableRowsPerPage){
-   const times=timeKeys.slice(i,i+timetableRowsPerPage);
-   const isContinuation=i>0;
-   timePages.push(`<section class="timetable-page${isContinuation?' timetable-continued':''}">${isContinuation?`<h2 class="page-title">コート別時間割（続き）</h2>`:''}<table class="schedule"><thead><tr><th class="time-head">開始</th>${courts.map(c=>`<th>${esc(c.name)}</th>`).join('')}</tr></thead><tbody>${times.map(time=>`<tr><th class="time-head">${esc(time)}</th>${courts.map(c=>{const games=slotMap.get(time+'|'+c.id)||[];return `<td>${games.length?games.map(matchTile).join(''):'<div class="empty-slot">—</div>'}</td>`;}).join('')}</tr>`).join('')}</tbody></table></section>`);
- }
- const schedule=timePages.join('');
+ // Use one flowing table and let the print engine paginate between complete rows.
+ // The browser repeats the column heading on each printed page.
+ const schedule=`<section class="timetable-page"><table class="schedule"><thead><tr><th class="time-head">開始</th>${courts.map(c=>`<th>${esc(c.name)}</th>`).join('')}</tr></thead><tbody>${timeKeys.map(time=>`<tr><th class="time-head">${esc(time)}</th>${courts.map(c=>{const games=slotMap.get(time+'|'+c.id)||[];return `<td class="${games.length===1?'schedule-filled':''}" ${games.length===1?`style="${styleFor(games[0].category_id,games[0].group_name,stageFor(games[0])?.stage_type==='knockout')}"`:''}>${games.length?games.map(matchTile).join(''):'<div class="empty-slot">—</div>'}</td>`;}).join('')}</tr>`).join('')}</tbody></table></section>`;
  const headings=`<h1>${esc(t.name)} <span class="draft">${t.status==='draft'?'【確認用・非公開】':'【'+esc(t.status)+'】'}</span></h1><p class="subtitle">開催日：${esc(t.event_date||'未設定')} ／ 開催時間：${esc((t.start_time||'').slice(0,5))}〜${esc((t.end_time||'').slice(0,5))}</p>`;
  const groupSheets=[];
  for(const c of cats){
@@ -2060,6 +2051,29 @@ function printTournament(){
  .ko-bye-card .ko-team{margin-top:8px}
  .ko-bye-marker{margin-top:8px;padding:6px 8px}
  .ko-placing{position:relative;margin-top:24px;padding-top:12px;clear:both}
+}
+
+/* Step 388: timetable print only. Fill each schedule cell with its group/final color. */
+.schedule td.schedule-filled{padding:0!important;vertical-align:middle;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.schedule td.schedule-filled .game-tile{background:transparent!important;border-top:0!important;border-radius:0;margin:0;min-height:0;height:100%;padding:5px 4px}
+@media print{
+ .timetable-page{break-inside:avoid!important;page-break-inside:avoid!important}
+ .timetable-page .schedule{break-inside:avoid!important;page-break-inside:avoid!important}
+ .timetable-page .schedule tr{break-inside:avoid!important;page-break-inside:avoid!important}
+ .timetable-continued{break-before:page!important;page-break-before:always!important}
+ .schedule td.schedule-filled{background-clip:border-box!important}
+}
+
+/* Step 389: print timetable with content-driven page breaks. */
+@media print{
+ .timetable-page,.timetable-page .schedule{break-inside:auto!important;page-break-inside:auto!important}
+ .timetable-page{break-before:auto!important;page-break-before:auto!important}
+ .schedule{break-before:auto!important;page-break-before:auto!important}
+ .schedule thead{display:table-header-group!important}
+ .schedule tbody{display:table-row-group!important}
+ .schedule tbody tr{break-inside:avoid!important;page-break-inside:avoid!important}
+ .schedule td,.schedule th{break-inside:avoid;page-break-inside:avoid}
+ .schedule td.schedule-filled{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style></head><body><div class="toolbar"><button onclick="window.print()">印刷する / PDFとして保存</button></div>${headings}<h2 class="page-title">コート別時間割（${ms.length}試合）</h2><p class="legend">時間帯を縦、コートを横に表示。カテゴリーと組の色はリーグ表にも共通です。スコアはリーグ表に記入してください。</p>${schedule}${others}${groupSheets.join('')}${knockoutSheets.join('')}</body></html>`;
  popup.document.open();popup.document.write(doc);popup.document.close();
