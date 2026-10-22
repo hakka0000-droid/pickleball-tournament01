@@ -2600,7 +2600,14 @@ function pairRevisionSection(tid){
   const before=active.filter(p=>p.category_id===c.id).length;
   const after=before+adds.filter(x=>x.categoryId===c.id).length-outs.filter(x=>x.categoryId===c.id).length;
   const limit=Number(c.planned_pairs);
-  return `<tr><td>${esc(c.name)}</td><td>${before}</td><td>${after}</td><td>${Number.isFinite(limit)?limit:'未設定'}</td><td>${after<3?'3組未満':Number.isFinite(limit)&&after>limit?'募集上限超過':'組分け・試合数の再計算が必要'}</td></tr>`;
+  const max=Number(c.preliminary_group_max_pairs);
+  const options=balancedGroupOptions(after,max);
+  const preferred=options.length?options[options.length-1]:null;
+  const matchCount=preferred?preferred.sizes.reduce((sum,n)=>sum+n*(n-1)/2,0):null;
+  const existingPrelim=state.matches.filter(m=>m.category_id===c.id&&state.stages.some(st=>st.id===m.stage_id&&st.stage_type==='preliminary')).length;
+  const newGroups=preferred?preferred.sizes.map((n,i)=>`${groupLabel(i)}組${n}ペア`).join(' / '):'組分け不可';
+  const warning=after<3?'3ペア未満':Number.isFinite(limit)&&after>limit?'募集上限超過':!preferred?'組分け条件を満たしません':'概算のみ・保存不可';
+  return `<tr><td>${esc(c.name)}</td><td>${before}</td><td>${after}</td><td>${Number.isFinite(limit)?limit:'未設定'}</td><td>${esc(newGroups)}</td><td>${matchCount===null?'―':`${existingPrelim} → ${matchCount}`}</td><td>${warning}</td></tr>`;
  }).join('');
  const changes=pairRevisionDraft.changes.map((c,i)=>`<li>${esc(c.type==='add'?'追加':'辞退')}：${esc(c.categoryName)} / ${esc(c.name)} <button class="btn secondary mini-btn" data-revision-remove="${i}">取消</button></li>`).join('');
  return `<div class="card stack" id="pairRevisionSection"><h3>公開後の参加ペア変更案（下書き）</h3><div class="notice">この変更案は画面上での仮入力です。DBには保存されず、ページを閉じると消えます。対戦表・時間割は変更されません。</div>
@@ -2612,9 +2619,9 @@ function pairRevisionSection(tid){
   <h4>ペア辞退案</h4><select class="field" id="revisionWithdrawPair">${pairOptions||'<option value="">選択できるペアがありません</option>'}</select>
   <button class="btn secondary" id="revisionWithdraw" ${pairOptions?'':'disabled'}>変更案に辞退を追加</button>
   <h4>変更案の確認</h4>${changes?`<ul>${changes}</ul>`:'<p class="prompt">まだ変更案はありません。</p>'}
-  <div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>現在の有効ペア</th><th>変更案</th><th>募集上限</th><th>注意</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>現在の有効ペア</th><th>変更案</th><th>募集上限</th><th>組分け案</th><th>予選試合数（現→案）</th><th>注意</th></tr></thead><tbody>${rows}</tbody></table></div>
   ${pairRevisionDraft.error?`<div class="empty-error" role="alert">${esc(pairRevisionDraft.error)}</div>`:''}
-  <p class="prompt">※組分け・対戦表・時間割の再生成結果は未計算です。一括確定機能は未実装のため、この画面には保存ボタンを設けていません。</p>
+  <p class="prompt">※組分け案と予選試合数はペア数だけから計算した概算です。対戦カード、決勝、時間割の再生成・競合検証は未実施です。一括確定機能が未実装のため、保存はできません。</p>
   <button class="btn secondary" id="revisionClear" ${pairRevisionDraft.changes.length?'':'disabled'}>変更案をすべてクリア</button></div>`;
 }
 function addRevisionDraft(){
