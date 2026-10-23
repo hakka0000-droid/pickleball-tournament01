@@ -65,7 +65,19 @@
 }
 @media screen{.basic-panel{margin:12px 0;border:1px solid #d7e0e8;border-radius:12px;background:var(--panel,#fff);overflow:hidden}.basic-panel>summary{cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:15px 18px;font-weight:700;list-style:none}.basic-panel>summary::-webkit-details-marker{display:none}.basic-panel>summary:after{content:'＋';margin-left:12px;font-size:20px}.basic-panel[open]>summary:after{content:'−'}.panel-chevron{font-weight:400;font-size:12px;opacity:.6;margin-left:auto}.basic-panel-content{padding:0 12px 12px}.basic-panel-content>h2:first-child{display:none}}
 @media(max-width:720px){.basic-panel>summary{padding:14px}.basic-panel-content{padding:0 8px 8px}}
-}</style><style id="bulk-generation-complete-style">
+}
+/* Step 415: keep the collapsible pair-swap form in a clean single column. */
+@media screen{
+ .group-swap-panel{display:block;min-width:0;}
+ .group-swap-panel>summary{cursor:pointer;display:list-item;padding:10px 2px;font-weight:700;}
+ .group-swap-body{display:flex;flex-direction:column;gap:14px;padding-top:12px;min-width:0;}
+ .group-swap-body>.prompt{margin:0 0 4px;}
+ .group-swap-field{display:block;min-width:0;}
+ .group-swap-field>label{display:block;margin:0 0 8px;}
+ .group-swap-field>.field{display:block;width:100%;margin:0;}
+ .group-swap-body>.btn{display:block;width:100%;margin-top:2px;}
+}
+</style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
 </head>
@@ -904,7 +916,7 @@ function groupingPreviewSection(t,categories){
     <p class="prompt">${demo?'仮ペア16組を使用します。大会の登録データは使いません。':`登録済み有効ペア：${active.length}組 ／ 辞退・失格など除外：${inactive.length}組 ／ 設定済みの最大人数：${Number.isInteger(max)&&max>=3&&max<=6?max+'ペア':'未設定'}`}</p>
     <div><label for="groupPreviewCount">組数（各組3ペア以上、人数差は最大1ペア）</label><select class="field" id="groupPreviewCount" ${options.length?'':'disabled'}>${options.length?options.map(o=>opt(String(o.count),`${o.count}組：${o.sizes.join('・')}ペア`,groupingPreview.groupCount)).join(''):opt('','候補なし','')}</select></div>
     ${!demo&&protectedData?'<div class="notice">このカテゴリーには既存の試合や確定情報があります。将来の保存処理は安全性確認が完了するまで禁止する設計です。ここでの表示はDBに影響しません。</div>':''}
-    ${selected?`<p><b>${participants.length}ペア → ${selected.count}組</b>（${selected.sizes.join('・')}ペア／組）</p>${!demo&&canSaveGroups?`<details class="card stack"><summary><b>ペアの個別入れ替え（保存前）</b></summary><p class="prompt">2ペアを選んで入れ替えます。各組の人数は変わりません。入れ替えだけではDBに保存されません。</p><label>ペア①</label><select class="field" id="groupSwapA">${groups.flatMap(g=>g.members.map(p=>`<option value="${esc(p.id)}" data-group="${esc(g.name)}">${esc(g.name+'組：'+p.display_name)}</option>`)).join('')}</select><label>ペア②</label><select class="field" id="groupSwapB">${groups.flatMap(g=>g.members.map(p=>`<option value="${esc(p.id)}" data-group="${esc(g.name)}">${esc(g.name+'組：'+p.display_name)}</option>`)).join('')}</select><button type="button" class="btn secondary wide" id="groupSwapSubmit">2ペアを入れ替える</button></details>`:''}<div class="grid">${grid}</div>`:`<div class="notice">${demo?'人数構成を計算できません。':'現在の有効ペア数と最大組人数では組分け候補がありません。3ペア以上を登録するか、カテゴリーの募集枠設定を確認してください。'}</div>`}
+    ${selected?`<p><b>${participants.length}ペア → ${selected.count}組</b>（${selected.sizes.join('・')}ペア／組）</p>${!demo&&canSaveGroups?`<details class="card group-swap-panel"><summary><b>ペアの個別入れ替え（保存前）</b></summary><div class="group-swap-body"><p class="prompt">2ペアを選んで入れ替えます。各組の人数は変わりません。入れ替えだけではDBに保存されません。</p><div class="group-swap-field"><label for="groupSwapA">ペア①</label><select class="field" id="groupSwapA">${groups.flatMap(g=>g.members.map(p=>`<option value="${esc(p.id)}" data-group="${esc(g.name)}">${esc(g.name+'組：'+p.display_name)}</option>`)).join('')}</select></div><div class="group-swap-field"><label for="groupSwapB">ペア②</label><select class="field" id="groupSwapB">${groups.flatMap(g=>g.members.map(p=>`<option value="${esc(p.id)}" data-group="${esc(g.name)}">${esc(g.name+'組：'+p.display_name)}</option>`)).join('')}</select></div><button type="button" class="btn secondary wide" id="groupSwapSubmit">2ペアを入れ替える</button></div></details>`:''}<div class="grid">${grid}</div>`:`<div class="notice">${demo?'人数構成を計算できません。':'現在の有効ペア数と最大組人数では組分け候補がありません。3ペア以上を登録するか、カテゴリーの募集枠設定を確認してください。'}</div>`}
     <button type="button" class="btn wide" id="savePreliminaryGroups" ${canSaveGroups?'':'disabled'}>${groupingPreview.busy?'確定処理中…':'予選組分けを確定して保存'}</button>
     ${!canSaveGroups?`<p class="prompt" role="status">保存できない理由：${esc(saveBlockReason)}</p>`:''}
     
