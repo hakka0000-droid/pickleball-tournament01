@@ -1139,9 +1139,10 @@ function home(){
  const ms=visibleMatches();
  const done=ms.filter(m=>isDone(m)||isWalkover(m)).length;
  const cats=filteredCategories();
- const pairs=state.pairs.filter(p=>(state.category==='all'||p.category_id===state.category)&&(state.tournament==='all'||cats.some(c=>c.id===p.category_id)));
+ const visibleCategoryIds=new Set(cats.filter(c=>state.category==='all'||c.id===state.category).map(c=>c.id));
+ const pairs=state.pairs.filter(p=>visibleCategoryIds.has(p.category_id));
  const percent=ms.length?Math.round(100*done/ms.length):0;
- return `<h2>進行状況</h2>${controls()}
+ return `<h2>進行状況</h2>${controls()}${opsPublishedIds().size===0?'<p class="prompt">公開済みの大会はありません。大会準備で公開すると、ここに進行状況が表示されます。</p>':''}
  <div class="ops-progress-summary">
    <div class="ops-progress-numbers">
      <div><span>登録ペア</span><strong>${pairs.length}</strong><small>組</small></div>
