@@ -161,6 +161,20 @@
     margin-right:0;
   }
 }
+
+/* Step 430: Remove only redundant inner cards in tournament basic settings.
+   Keep category-specific cards, input borders, notices and status indicators. */
+@media screen {
+  .basic-panel[data-basic-panel="settings"] > .basic-panel-content > .card,
+  .basic-panel[data-basic-panel="courts"] > .basic-panel-content > .card {
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    border-radius: 0;
+    margin: 0;
+    padding: 4px 0 10px;
+  }
+}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
