@@ -102,6 +102,65 @@
  .tournament-settings-fields input[type="date"],
  .tournament-settings-fields input[type="time"] { width:calc(100% - 12px); max-width:calc(100% - 12px); margin-right:12px; }
 }
+
+/* Step 428: scoped form consistency without replacing native date/time pickers. */
+@media screen {
+  #tournamentSettingsForm { min-width:0; }
+  #tournamentSettingsForm > div, #tournamentSettingsForm .tournament-settings-fields,
+  #tournamentSettingsForm .tournament-settings-fields > div { min-width:0; max-width:100%; }
+  #tournamentSettingsForm input.field {
+    display:block;
+    box-sizing:border-box;
+    inline-size:100%;
+    min-inline-size:0;
+    max-inline-size:100%;
+    min-height:52px;
+    height:52px;
+    padding:10px 14px;
+    margin:0;
+    border:1px solid #cedde3;
+    border-radius:10px;
+    background-color:#fff;
+    color:#182f3c;
+    font-size:16px;
+    line-height:1.35;
+    box-shadow:none;
+  }
+  /* Keep native OS controls for date and time; constrain their intrinsic width. */
+  #tournamentSettingsForm input.field[type="date"],
+  #tournamentSettingsForm input.field[type="time"] {
+    -webkit-appearance:auto;
+    appearance:auto;
+    max-inline-size:100%;
+    overflow:hidden;
+  }
+  #tournamentSettingsForm input.field:disabled {
+    background-color:#f7f9fa;
+    color:#617380;
+    border-color:#dce5ea;
+    opacity:1;
+    -webkit-text-fill-color:#617380;
+  }
+  #tournamentSettingsForm input.field:enabled:focus-visible {
+    outline:2px solid #2e8277;
+    outline-offset:1px;
+  }
+  #tournamentSettingsForm .tournament-settings-fields {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:14px;
+  }
+  #tournamentSettingsForm label { margin-bottom:7px; }
+}
+@media screen and (max-width:759px) {
+  #tournamentSettingsForm .tournament-settings-fields { grid-template-columns:minmax(0,1fr); }
+  #tournamentSettingsForm input.field[type="date"],
+  #tournamentSettingsForm input.field[type="time"] {
+    inline-size:100%;
+    max-inline-size:100%;
+    margin-right:0;
+  }
+}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
