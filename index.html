@@ -365,6 +365,19 @@
 .tournament-delete-btn{background:#fff!important;border:1px solid #ba4848!important;color:#a23636!important;width:auto;max-width:100%;font-size:14px;cursor:pointer}
 .tournament-delete-btn:disabled{background:#e3e7e9!important;border-color:#e3e7e9!important;color:#7b878e!important}
 @media(max-width:560px){.tournament-delete-btn{width:100%}}
+
+/* Step 480: new tournament form, mobile Safari safe sizes */
+#createTournamentForm, #createTournamentForm .card, #createTournamentForm .nt-field {min-width:0;max-width:100%;}
+#createTournamentForm .nt-field {width:100%;box-sizing:border-box;}
+#createTournamentForm input.field {display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box;font-size:16px;}
+#createTournamentForm input[type="date"],
+#createTournamentForm input[type="time"] {min-width:0;max-width:100%;width:100%;box-sizing:border-box;-webkit-appearance:auto;appearance:auto;}
+#createTournamentForm .new-tournament-fields {grid-template-columns:repeat(2,minmax(0,1fr));}
+@media (max-width:759px) {
+ #createTournamentForm .new-tournament-fields {grid-template-columns:minmax(0,1fr);}
+ #createTournamentForm input[type="date"],
+ #createTournamentForm input[type="time"] {width:100%;max-width:100%;min-width:0;min-height:48px;}
+}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
@@ -2958,7 +2971,7 @@ function newCategoryDraft(){return {levels:[1],division:'フリー',order:String
 function categoryDraftName(c){return c.levels.map(n=>CATEGORY_LEVELS[n]).join('・')+'／'+c.division;}
 function newTournamentCreationSection(){
  const d=newTournamentDraft;
- const field=(label,key,type='text',extra='')=>`<div><label for="nt-${key}">${label}</label><input class="field" id="nt-${key}" data-nt-field="${key}" type="${type}" value="${esc(d[key])}" ${extra}></div>`;
+ const field=(label,key,type='text',extra='')=>`<div class="nt-field nt-field-${key}"><label for="nt-${key}">${label}</label><input class="field" id="nt-${key}" data-nt-field="${key}" type="${type}" value="${esc(d[key])}" ${extra}></div>`;
  const categoryCards=d.categories.map((c,i)=>{
   const title=categoryDraftName(c);
   const levels=CATEGORY_LEVELS.map((lv,j)=>`<label class="category-level"><input type="checkbox" data-nt-level="${i}" value="${j}" ${c.levels.includes(j)?'checked':''}><span>${esc(lv)}</span></label>`).join('');
@@ -2966,7 +2979,7 @@ function newTournamentCreationSection(){
   const cs=(label,key,values)=>`<div><label>${label}</label><select class="field" data-nt-cat="${i}" data-nt-key="${key}">${values.map(v=>opt(String(v[0]),v[1],String(c[key]))).join('')}</select></div>`;
   return `<div class="card stack"><div class="row"><h3 style="margin:0">カテゴリー${i+1}：${esc(title)}</h3><button type="button" class="btn secondary mini-btn" data-nt-remove="${i}">削除</button></div><div><label>級別（連続する範囲を選択）</label><div class="category-levels">${levels}</div></div><div class="grid">${cs('参加区分','division',CATEGORY_DIVISIONS.map(x=>[x,x]))}${cf('表示順（0〜1000）','order','number','min="0" max="1000" step="1"')}</div><h3>募集枠（任意）</h3><div class="grid">${cf('募集予定ペア数（3〜64、未定なら空欄）','pairs','number','min="3" max="64" step="1" placeholder="未設定"')}${cs('1組の最大ペア数','group',[3,4,5,6].map(x=>[x,x+'ペア']))}${cs('各組の決勝進出','advance',[[1,'上位1ペア'],[2,'上位2ペア']])}<div><label>決勝形式（進出ペア数で自動決定）</label><p class="prompt">2ペア：決勝1試合／3ペア：総当たり3試合／4ペア：準決勝・決勝・3位決定戦（4試合）</p></div></div><p class="prompt">募集予定ペア数が空欄なら、予選・決勝条件もDBへは保存しません。</p><h3>開催枠（任意）</h3><div class="grid">${cf('カテゴリー開始','start','time')}${cf('カテゴリー終了','end','time')}${cf('希望コート面数','preferred','number','min="1" max="100" placeholder="未設定"')}${cf('最大同時コート面数','max','number','min="1" max="100" placeholder="未設定"')}</div><p class="prompt">設定する場合は4項目すべて入力してください。開催枠は大会開始90分後から終了60分前までです。</p></div>`;
  }).join('');
- return `<h2>大会情報を新規登録</h2><div class="notice blue">システム管理者専用です。大会・公式コート・カテゴリー・募集枠・開催枠を一括作成します。途中でエラーが出た場合は全体をロールバックします。</div><form class="stack" id="createTournamentForm"><div class="card stack"><h3>1. 大会基本情報</h3>${field('大会名（必須）','name','text','maxlength="200" required placeholder="例：秋季ピックルボール大会"')}${field('開催日（必須）','date','date','required')}<div class="grid">${field('大会開始時刻（必須）','start','time','required')}${field('大会終了時刻（必須）','end','time','required')}${field('1試合の時間（分）','minutes','number','min="1" max="180" required')}${field('最低休憩時間（分）','rest','number','min="0" max="180" required')}${field('最大連続試合数','consecutive','number','min="1" max="10" required')}${field('公式コート数（0〜100）','courts','number','min="0" max="100" required')}</div><p class="prompt">大会開始後90分（設営30分・受付とアップ45分・開会式15分）と終了前60分（閉会式・撤収）を確保します。コート0面でも下書きを作成できますが、開催枠のあるカテゴリーは登録できません。</p></div><div class="row"><h2>2. カテゴリーと募集枠（任意）</h2><button type="button" class="btn secondary mini-btn" id="ntAddCategory">＋ 追加</button></div>${categoryCards||'<div class="card"><p class="prompt">カテゴリーはまだ追加されていません。基本情報だけで大会を作成することもできます。</p></div>'}<div class="card stack"><p class="prompt">作成ステータスは下書き（draft）です。作成後に各設定を変更できます。実ペア・対戦表・正式な時間割は生成しません。</p><p id="createTournamentMsg" class="empty-error hide" role="alert"></p><button id="createTournamentSubmit" type="submit" class="btn wide" ${newTournamentBusy?'disabled':''}>${newTournamentBusy?'作成中…':'内容を確認して大会を作成'}</button></div></form>`;
+ return `<h2>大会情報を新規登録</h2><div class="notice blue">大会名と開催日時を入力してください。カテゴリーは後から追加できます。</div><form class="stack" id="createTournamentForm"><div class="card stack new-tournament-basic"><h3>1. 大会基本情報</h3>${field('大会名（必須）','name','text','maxlength="200" required placeholder="例：秋季ピックルボール大会"')}${field('開催日（必須）','date','date','required')}<div class="grid new-tournament-fields">${field('大会開始時刻（必須）','start','time','required')}${field('大会終了時刻（必須）','end','time','required')}${field('1試合の時間（分）','minutes','number','min="1" max="180" required')}${field('最低休憩時間（分）','rest','number','min="0" max="180" required')}${field('最大連続試合数','consecutive','number','min="1" max="10" required')}${field('公式コート数（0〜100）','courts','number','min="0" max="100" required')}</div><p class="prompt">試合に使える時間は、開始90分後から終了60分前までです。</p></div><div class="row"><h2>2. カテゴリーと募集枠（任意）</h2><button type="button" class="btn secondary mini-btn" id="ntAddCategory">＋ 追加</button></div>${categoryCards||'<div class="card"><p class="prompt">カテゴリーは大会作成後にも追加できます。</p></div>'}<div class="card stack"><p class="prompt">大会は下書きで作成されます。保存後も設定を変更できます。</p><p id="createTournamentMsg" class="empty-error hide" role="alert"></p><button id="createTournamentSubmit" type="submit" class="btn wide" ${newTournamentBusy?'disabled':''}>${newTournamentBusy?'作成中…':'内容を確認して大会を作成'}</button></div></form>`;
 }
 function intField(raw,min,max,label){if(!/^\d+$/.test(String(raw)))throw Error(label+'は整数で入力してください。');const n=Number(raw);if(!Number.isSafeInteger(n)||n<min||n>max)throw Error(label+'は'+min+'〜'+max+'の整数で指定してください。');return n;}
 function validateNewTournament(){
