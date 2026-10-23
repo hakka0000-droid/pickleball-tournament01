@@ -378,6 +378,25 @@
  #createTournamentForm input[type="date"],
  #createTournamentForm input[type="time"] {width:100%;max-width:100%;min-width:0;min-height:48px;}
 }
+
+/* Step481: iOS Safari intrinsic date/time widget width guard. */
+#createTournamentForm .new-tournament-basic,
+#createTournamentForm .new-tournament-basic .nt-field,
+#createTournamentForm .new-tournament-fields,
+#createTournamentForm .new-tournament-fields > .nt-field {min-width:0;max-width:100%;box-sizing:border-box;}
+#createTournamentForm .new-tournament-basic {overflow:hidden;}
+#createTournamentForm .new-tournament-basic .nt-field-date,
+#createTournamentForm .new-tournament-basic .nt-field-start,
+#createTournamentForm .new-tournament-basic .nt-field-end {padding-right:24px;}
+#createTournamentForm .new-tournament-basic input[type="date"],
+#createTournamentForm .new-tournament-basic input[type="time"] {
+  display:block;box-sizing:border-box;width:100%;max-width:100%;min-width:0;
+  -webkit-appearance:none;appearance:none;
+  font-size:16px;min-height:48px;
+}
+@media(max-width:759px) {
+  #createTournamentForm .new-tournament-fields {grid-template-columns:minmax(0,1fr);}
+}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
