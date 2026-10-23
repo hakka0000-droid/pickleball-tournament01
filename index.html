@@ -328,6 +328,22 @@
 @media (max-width:600px) {
  [data-draw-panel] > .basic-panel-content > .draw-plain > .grid { grid-template-columns:minmax(0,1fr); }
 }
+
+/* Step 458: tournament schedule, compact operator-first layout */
+.schedule-main{min-width:0;max-width:100%;}
+.schedule-main>.metrics,.schedule-overview>.metrics{margin:12px 0;}
+.schedule-help{font-size:13px;color:#617784;line-height:1.6;margin:9px 0 14px;}
+.schedule-list-fold{border:1px solid #dce6ea;border-radius:14px;background:#fff;margin:14px 0;min-width:0;max-width:100%;overflow:hidden;}
+.schedule-list-fold>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none;padding:15px 16px;font-weight:750;color:#213744;}
+.schedule-list-fold>summary::-webkit-details-marker{display:none;}
+.schedule-list-fold>summary::after{content:'＋';font-size:22px;font-weight:700;line-height:1;}
+.schedule-list-fold[open]>summary::after{content:'−';}
+.schedule-list-fold>summary .panel-chevron{font-size:12px;color:#70818c;margin-left:auto;}
+.schedule-list-body{padding:2px 14px 14px;}
+.schedule-list-fold>.tablebox{padding:2px 12px 12px;}
+.schedule-list-fold .saved-schedule-mobile{padding-top:4px;}
+.schedule-main>.btn{margin-top:12px;}
+@media(max-width:759px){.schedule-main .metrics{gap:6px}.schedule-main .metric{padding:12px 7px}.schedule-main .metric strong{font-size:21px}}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
@@ -2084,8 +2100,8 @@ function savedRealScheduleSection(t,all){
  const editButton=m=>canEdit?`<button type="button" class="btn secondary mini-btn" data-manual-edit="${esc(m.id)}">この試合を修正</button>`:'—';
  const content=rows.map(m=>`<tr><td>${esc(when(m))}</td><td>${esc(courtName(m.court_id))}</td><td>${esc(catName(m.category_id))}・${esc(matchLabel(m))}</td><td>${esc(pairName(m.pair_a_id))} 対 ${esc(pairName(m.pair_b_id))}</td><td>${editButton(m)}</td></tr>`).join('');
  const mobile=rows.map(m=>`<div class="saved-schedule-item"><div class="row"><b>${esc(matchCode(m)||'試合')}</b><span class="status">${esc(matchLabel(m))}</span></div><p style="margin:7px 0 4px"><b>${esc(when(m))}</b> ／ ${esc(courtName(m.court_id))}</p><div class="mini">${esc(catName(m.category_id))} ／ ${esc(pairName(m.pair_a_id))} 対 ${esc(pairName(m.pair_b_id))}</div>${canEdit?editButton(m):''}</div>`).join('');
- const guidance=canEdit?'<div class="notice blue">時刻・コートを変更する場合は、下の各試合の「この試合を修正」を押してください。他の試合は変更されません。</div>':'';
- return `<div class="notice ${partial?'':'blue'}"><b>${partial?'割当が一部不足しています。':'DB保存済みの時間割を表示しています。'}</b> 一括の再保存はできません。${canEdit?'下書き大会では個別修正できます。':''}</div><div class="metrics"><div class="metric"><small>登録済み試合</small><strong>${all.length}</strong></div><div class="metric"><small>時刻・コート割当済み</small><strong>${all.filter(m=>m.start_time&&m.court_id).length}</strong></div><div class="metric"><small>未割当</small><strong>${all.filter(m=>!m.start_time||!m.court_id).length}</strong></div></div>${guidance}<div class="tablebox saved-schedule-desktop"><table class="tbl"><thead><tr><th>開始日時</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th><th>修正</th></tr></thead><tbody>${content}</tbody></table></div><div class="saved-schedule-mobile">${mobile}</div>${manualScheduleEditor(t,all)}${manualScheduleEdit.message?`<div role="status" class="${manualScheduleEdit.ok?'notice blue':'empty-error'}">${esc(manualScheduleEdit.message)}</div>`:''}`;
+ const guidance=canEdit?'<p class="schedule-help">試合一覧を開き、「この試合を修正」から時刻・コートを変更できます。</p>':'';
+ return `<div class="schedule-overview"><div class="notice ${partial?'':'blue'}">${partial?'割当が一部不足しています。':'時間割は保存済みです。'}${canEdit?' 下書き大会では試合ごとに修正できます。':''}</div><div class="metrics"><div class="metric"><small>登録済み試合</small><strong>${all.length}</strong></div><div class="metric"><small>割当済み</small><strong>${all.filter(m=>m.start_time&&m.court_id).length}</strong></div><div class="metric"><small>未割当</small><strong>${all.filter(m=>!m.start_time||!m.court_id).length}</strong></div></div></div><details class="schedule-list-fold" ${manualScheduleEdit.matchId?'open':''}><summary>保存済みの試合一覧<span class="panel-chevron">開閉</span></summary><div class="schedule-list-body">${guidance}<div class="tablebox saved-schedule-desktop"><table class="tbl"><thead><tr><th>開始日時</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th><th>修正</th></tr></thead><tbody>${content}</tbody></table></div><div class="saved-schedule-mobile">${mobile}</div></div></details>${manualScheduleEditor(t,all)}${manualScheduleEdit.message?`<div role="status" class="${manualScheduleEdit.ok?'notice blue':'empty-error'}">${esc(manualScheduleEdit.message)}</div>`:''}`;
 }
 function realScheduleSection(t){
  if(!t)return '<div class="notice">対象大会を選択してください。</div>';
@@ -2096,9 +2112,9 @@ function realScheduleSection(t){
   const plan=realSchedulePreview(t),{rows,pending,begin,deadline,total,courts,duration}=plan;
   const complete=!pending.length,canSave=scheduleSaveEligible(t,plan);
   const reason=complete?(t.status!=='draft'?'下書き大会のみ保存できます。':!state.tournamentAdminIds.includes(t.id)?'大会管理者権限が確認できません。':'保存条件を確認できません。更新してください。'):'未配置試合があるため保存できません。';
-  body=`<div class="metrics"><div class="metric"><small>仮配置</small><strong>${rows.length}/${total}</strong></div><div class="metric"><small>公式コート</small><strong>${courts.length}面</strong></div><div class="metric"><small>未配置</small><strong>${pending.length}</strong></div></div><div class="notice ${complete?'blue':''}">${complete?'全試合を仮配置できました。重複・休憩・連戦の独立チェックも通過しました。':'全試合を配置できませんでした。時間枠や試合条件をご確認ください。'} 保存操作をするまでDBは変更されません。</div><p class="prompt">試合開始可能 ${minuteClock(begin)} ／ 終了期限 ${minuteClock(deadline)} ／ 1試合 ${duration}分 ／ 最終仮終了 ${rows.length?minuteClock(Math.max(...rows.map(r=>r.end))):'—'}</p><div class="tablebox"><table class="tbl"><thead><tr><th>開始〜終了</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${minuteClock(r.start)}〜${minuteClock(r.end)}</td><td>${esc(r.court.name)}</td><td>${esc(catName(r.match.category_id))}・${esc(stageFor(r.match)?.stage_type==='knockout'?(isThirdPlaceMatch(r.match)?'3位決定戦':(state.bracketSlots.find(bs=>bs.match_id===r.match.id)?.round_number===2?'決勝':'準決勝')):(r.match.group_name||'—')+'組')}</td><td>${esc(pairName(r.match.pair_a_id))} 対 ${esc(pairName(r.match.pair_b_id))}</td></tr>`).join('')||'<tr><td colspan="4">仮配置なし</td></tr>'}</tbody></table></div><button type="button" class="btn wide" id="saveRealSchedule" ${canSave?'':'disabled'}>${realScheduleSave.busy?'保存・照合中…':'時間割を正式保存（全試合一括）'}</button>${!canSave?`<p class="prompt">保存できない理由：${esc(reason)}</p>`:''}`;
+  body=`<div class="metrics"><div class="metric"><small>仮配置</small><strong>${rows.length}/${total}</strong></div><div class="metric"><small>公式コート</small><strong>${courts.length}面</strong></div><div class="metric"><small>未配置</small><strong>${pending.length}</strong></div></div><div class="notice ${complete?'blue':''}">${complete?'全試合を仮配置できました。':'配置できない試合があります。時間枠や試合条件を確認してください。'} 保存操作をするまでDBは変更されません。</div><p class="prompt">試合開始可能 ${minuteClock(begin)} ／ 終了期限 ${minuteClock(deadline)} ／ 1試合 ${duration}分 ／ 最終仮終了 ${rows.length?minuteClock(Math.max(...rows.map(r=>r.end))):'—'}</p><details class="schedule-list-fold" open><summary>仮時間割を確認（${rows.length}試合）<span class="panel-chevron">開閉</span></summary><div class="tablebox"><table class="tbl"><thead><tr><th>開始〜終了</th><th>コート</th><th>カテゴリー・組</th><th>対戦</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${minuteClock(r.start)}〜${minuteClock(r.end)}</td><td>${esc(r.court.name)}</td><td>${esc(catName(r.match.category_id))}・${esc(stageFor(r.match)?.stage_type==='knockout'?(isThirdPlaceMatch(r.match)?'3位決定戦':(state.bracketSlots.find(bs=>bs.match_id===r.match.id)?.round_number===2?'決勝':'準決勝')):(r.match.group_name||'—')+'組')}</td><td>${esc(pairName(r.match.pair_a_id))} 対 ${esc(pairName(r.match.pair_b_id))}</td></tr>`).join('')||'<tr><td colspan="4">仮配置なし</td></tr>'}</tbody></table></div></details><button type="button" class="btn wide" id="saveRealSchedule" ${canSave?'':'disabled'}>${realScheduleSave.busy?'保存・照合中…':'時間割を正式保存（全試合一括）'}</button>${!canSave?`<p class="prompt">保存できない理由：${esc(reason)}</p>`:''}`;
  }catch(e){body=`<div class="notice">${esc(e.message)}</div>`;}
- return `<h2>実試合の時間割</h2><div class="notice blue">既存の試合IDを使い、公式コートを大会全体で共有します。開始後90分と終了前60分は運営用に確保。正式保存は大会管理者のみ・初回1回限りです。</div><div class="card stack">${body}${realScheduleSave.message?`<div class="${realScheduleSave.ok?'notice blue':'empty-error'}" role="status">${esc(realScheduleSave.message)}</div>`:''}<p class="prompt">仮配置は簡易探索です。サーバー側で選手・時間帯・連戦・カテゴリー上限を再検証します。サーバーが拒否した場合は保存しません。決勝仮試合は予選終了後、ラウンド順に配置します。当日欠場による自動再編成は行いません。</p></div>`;
+ return `<h2>時間割</h2><p class="schedule-help">大会の開始後90分と終了前60分は運営用に確保します。保存前に仮時間割を確認してください。</p><div class="schedule-main">${body}${realScheduleSave.message?`<div class="${realScheduleSave.ok?'notice blue':'empty-error'}" role="status">${esc(realScheduleSave.message)}</div>`:''}</div>`;
 }
 async function saveRealSchedule(){
  if(realScheduleSave.busy)return;
