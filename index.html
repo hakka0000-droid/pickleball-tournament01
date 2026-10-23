@@ -401,6 +401,22 @@
 @media (max-width:759px) {
   #createTournamentForm .new-tournament-fields {grid-template-columns:minmax(0,1fr);}
 }
+
+/* Step 483: Outer frame is the single source of truth for iOS native date/time widths. */
+#createTournamentForm .new-tournament-basic .nt-native-shell {
+  display:block; inline-size:100%; width:100%; min-width:0; max-width:100%;
+  box-sizing:border-box; overflow:hidden; border:1px solid #cedde3;
+  border-radius:10px; background:#fff;
+}
+#createTournamentForm .new-tournament-basic .nt-native-shell > input.field {
+  display:block; inline-size:100%; width:100%; max-inline-size:100%;
+  min-inline-size:0; min-width:0; max-width:100%; box-sizing:border-box;
+  margin:0; border:0; border-radius:0; background:transparent;
+  min-height:48px; padding:12px; font-size:16px;
+}
+#createTournamentForm .new-tournament-basic .nt-native-shell:focus-within {
+  outline:2px solid #3488be; outline-offset:1px;
+}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
@@ -2994,7 +3010,7 @@ function newCategoryDraft(){return {levels:[1],division:'フリー',order:String
 function categoryDraftName(c){return c.levels.map(n=>CATEGORY_LEVELS[n]).join('・')+'／'+c.division;}
 function newTournamentCreationSection(){
  const d=newTournamentDraft;
- const field=(label,key,type='text',extra='')=>`<div class="nt-field nt-field-${key}"><label for="nt-${key}">${label}</label><input class="field" id="nt-${key}" data-nt-field="${key}" type="${type}" value="${esc(d[key])}" ${extra}></div>`;
+ const field=(label,key,type='text',extra='')=>`<div class="nt-field nt-field-${key}"><label for="nt-${key}">${label}</label>${type==='date'||type==='time'?'<div class="nt-native-shell">':''}<input class="field" id="nt-${key}" data-nt-field="${key}" type="${type}" value="${esc(d[key])}" ${extra}>${type==='date'||type==='time'?'</div>':''}</div>`;
  const categoryCards=d.categories.map((c,i)=>{
   const title=categoryDraftName(c);
   const levels=CATEGORY_LEVELS.map((lv,j)=>`<label class="category-level"><input type="checkbox" data-nt-level="${i}" value="${j}" ${c.levels.includes(j)?'checked':''}><span>${esc(lv)}</span></label>`).join('');
