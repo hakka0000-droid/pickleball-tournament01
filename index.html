@@ -2461,7 +2461,15 @@ function tournamentSettingsSection(t){
   ['minimum_rest_minutes','最低休憩時間（分）','number',t.minimum_rest_minutes],
   ['max_consecutive_matches','最大連続試合数','number',t.max_consecutive_matches]
  ];
- const inputs=fields.map(([key,label,type,value])=>`<div><label for="ts-${key}">${label}</label><input class="field" id="ts-${key}" type="${type}" value="${esc(value)}" ${type==='number'?'min="'+(key==='minimum_rest_minutes'?0:1)+'" max="'+(key==='max_consecutive_matches'?999:180)+'" step="1"':''} ${editable&&can?'':'disabled'} required></div>`).join('');
+ // iOS Safari can render a disabled native date/time control wider than its CSS box.
+ // For protected settings, display the value as a disabled text field instead.
+ // Editable settings keep the browser's native date/time picker.
+ const inputs=fields.map(([key,label,type,value])=>{
+   const canEditField=editable&&can;
+   const shownType=!canEditField&&(type==='date'||type==='time')?'text':type;
+   const shownValue=!canEditField&&type==='date'?String(value).replace(/-/g,'/'):value;
+   return `<div><label for="ts-${key}">${label}</label><input class="field" id="ts-${key}" type="${shownType}" value="${esc(shownValue)}" ${type==='number'?'min="'+(key==='minimum_rest_minutes'?0:1)+'" max="'+(key==='max_consecutive_matches'?999:180)+'" step="1"':''} ${canEditField?'':'disabled'} required></div>`;
+ }).join('');
  return `<h2>大会基本設定の編集</h2><form class="card stack" id="tournamentSettingsForm"><div><label for="ts-name">大会名</label><input class="field" id="ts-name" value="${esc(t.name)}" maxlength="200" required ${can?'':'disabled'}></div><div class="grid tournament-settings-fields">${inputs}</div><p class="prompt">開催時間の開始後90分と終了前60分は運営時間として確保します。</p>${!editable?`<div class="notice">この大会には${count}試合が登録されています。既存の時間割を保護するため、現在は大会名のみ変更できます。</div>`:''}${t.status==='completed'?'<div class="notice">終了済み大会は編集できません。</div>':''}<button class="btn wide" id="tournamentSettingsSubmit" type="submit" ${can?'':'disabled'}>${tournamentSettingsSave.busy?'保存中…':'基本設定を保存'}</button>${tournamentSettingsSave.message?`<p class="${tournamentSettingsSave.ok?'notice blue':'empty-error'}" role="status">${esc(tournamentSettingsSave.message)}</p>`:''}</form>`;
 }
 async function saveTournamentSettings(e){
