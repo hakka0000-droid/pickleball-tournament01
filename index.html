@@ -3800,13 +3800,12 @@ function receptionSection(){
  const withdrawn=all.filter(p=>p.participation_status==='withdrawn').length;
  const checked=all.filter(p=>receptionView.checkins.has(p.id)).length;
  const allowedWrite=receptionView.loaded&&!receptionView.error&&!receptionView.busyId&&!state.loading&&['draft','published','in_progress'].includes(t.status);
- const statusText={active:'参加中',withdrawn:'欠場',disqualified:'失格'};
  const rows=matches.map(p=>{
   const isChecked=receptionView.loaded&&receptionView.checkins.has(p.id);
   const canCheck=allowedWrite&&p.participation_status==='active'&&(!isChecked||state.tournamentAdminIds.includes(t.id));
   const action=`<button type="button" class="btn ${isChecked?'secondary':''} mini-btn" data-reception-action="${esc(p.id)}" data-reception-undo="${isChecked?'1':'0'}" ${canCheck?'':'disabled'}>${isChecked?'受付取消':'受付済みにする'}</button>`;
   const withdraw=p.participation_status==='active'&&isAssignedTournamentStaff(t.id)?`<button type="button" class="btn secondary mini-btn" data-reception-withdrawal="${esc(p.id)}">欠場</button>`:'';
-  return `<article class="reception-pair"><div class="reception-pair-head"><div><b>${esc(p.display_name)}</b><div class="prompt">${esc(cats.get(p.category_id)?.name)}${p.group_name?' ・ '+esc(p.group_name)+'組':''}</div>${p.player1||p.player2?`<div class="prompt">${esc([p.player1,p.player2].filter(Boolean).join(' / '))}</div>`:''}</div><div class="reception-badges"><span class="status ${p.participation_status==='active'?'done':'pending'}">${esc(statusText[p.participation_status]||p.participation_status||'未設定')}</span><span class="status ${isChecked?'done':'pending'}">${!receptionView.loaded?'取得待ち':isChecked?'受付済み':'未受付'}</span></div></div><div class="reception-actions">${action}${withdraw}</div></article>`;
+  return `<article class="reception-pair"><div class="reception-pair-head"><div><b>${esc(p.display_name)}</b></div><div class="reception-badges"><span class="status ${p.participation_status==='withdrawn'?'pending':isChecked?'done':'pending'}">${p.participation_status==='withdrawn'?'欠場':p.participation_status==='disqualified'?'失格':!receptionView.loaded?'取得待ち':isChecked?'受付済み':'未受付'}</span></div></div><div class="reception-actions">${action}${withdraw}</div></article>`;
  }).join('');
  return `<h2>受付・欠場</h2>
  <div class="grid reception-filters"><div><label for="receptionTournament">大会</label><select class="field" id="receptionTournament">${eligible.map(x=>opt(x.id,x.name,t.id)).join('')}</select></div><div><label for="receptionCategory">カテゴリー</label><select class="field" id="receptionCategory">${opt('all','すべて',receptionView.categoryId)}${[...cats.values()].map(c=>opt(c.id,c.name,receptionView.categoryId)).join('')}</select></div></div>
