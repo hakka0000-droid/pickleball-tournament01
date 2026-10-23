@@ -1135,7 +1135,13 @@ function searchedMatches(){
 function updateMatchListResults(){
  const results=$('matchSearchResults'),count=$('matchSearchCount');
  if(!results||!count)return;
- const rows=searchedMatches().sort((a,b)=>{const ta=a.start_time?new Date(a.start_time).getTime():Infinity;const tb=b.start_time?new Date(b.start_time).getTime():Infinity;return (Number.isFinite(ta)?ta:Infinity)-(Number.isFinite(tb)?tb:Infinity)||courtName(a.court_id).localeCompare(courtName(b.court_id),'ja',{numeric:true})||matchCode(a).localeCompare(matchCode(b),'ja',{numeric:true});});
+ // Compare the displayed local start time. Some matches use scheduled_hhmm instead of start_time.
+ const sortClock=m=>{
+  const label=String(timeOf(m)||'');
+  const found=label.match(/^(\d{1,2}):(\d{2})/);
+  return found?Number(found[1])*60+Number(found[2]):Infinity;
+ };
+ const rows=searchedMatches().sort((a,b)=>sortClock(a)-sortClock(b)||courtName(a.court_id).localeCompare(courtName(b.court_id),'ja',{numeric:true})||matchCode(a).localeCompare(matchCode(b),'ja',{numeric:true}));
  count.textContent=`${rows.length} / ${visibleMatches().length} 試合を表示`;
  results.innerHTML=rows.map(matchCard).join('')||'<div class="empty">該当試合がありません。</div>';
  results.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));
@@ -3108,7 +3114,7 @@ async function createTournament(e){
 
 function matchViewSwitch(){return `<div class="match-view-switch" role="group" aria-label="試合の表示形式"><button type="button" data-match-view="list" class="${matchView==='list'?'selected':''}" aria-pressed="${matchView==='list'}">時間別</button><button type="button" data-match-view="court" class="${matchView==='court'?'selected':''}" aria-pressed="${matchView==='court'}">コート別</button></div>`;}
 function matches(){if(matchView==='court')return courts();return `${controls()}<h2>試合・結果</h2>${matchViewSwitch()}<div class="match-search-controls"><label for="matchNumberSearch">試合番号・ペア名・選手名で検索</label><div class="match-search-bar"><input class="field" id="matchNumberSearch" type="search" inputmode="search" autocomplete="off" placeholder="試合番号・ペア名・選手名" value="${esc(matchListFilter.query)}"><button class="btn secondary mini-btn" id="clearMatchSearch" type="button">クリア</button></div><label class="match-filter-check"><input type="checkbox" id="pendingMatchesOnly" ${matchListFilter.pendingOnly?'checked':''}>結果未入力の試合のみ表示</label></div><p class="match-filter-summary" id="matchSearchCount"></p><div class="grid" id="matchSearchResults"></div><details class="card"><summary><b>ペア別検索</b></summary>${pairs(true)}</details>`}
-function courts(){const ms=visibleMatches(),keys=[...new Set(ms.map(m=>m.court_id).filter(Boolean))];return `${controls()}<h2>試合・結果</h2>${matchViewSwitch()}${keys.map(k=>`<h2>${esc(courtName(k))}</h2><div class="grid">${ms.filter(m=>m.court_id===k).sort((a,b)=>timeOf(a).localeCompare(timeOf(b))).map(matchCard).join('')}</div>`).join('')||'<div class="empty">コート割当済みの試合はありません。</div>'}${ms.some(m=>!m.court_id)?`<h2>コート未割当</h2><div class="grid">${ms.filter(m=>!m.court_id).map(matchCard).join('')}</div>`:''}`}
+function courts(){const ms=visibleMatches(),keys=[...new Set(ms.map(m=>m.court_id).filter(Boolean))];return `${controls()}<h2>試合・結果</h2>${matchViewSwitch()}${keys.map(k=>`<h2>${esc(courtName(k))}</h2><div class="grid">${ms.filter(m=>m.court_id===k).sort((a,b)=>timeOf(a).localeCompare(timeOf(b),'ja',{numeric:true})).map(matchCard).join('')}</div>`).join('')||'<div class="empty">コート割当済みの試合はありません。</div>'}${ms.some(m=>!m.court_id)?`<h2>コート未割当</h2><div class="grid">${ms.filter(m=>!m.court_id).map(matchCard).join('')}</div>`:''}`}
 function slotDiagram(slots,cat,stage){
   const ordered=[...slots].sort((a,b)=>a.round_number-b.round_number||a.match_number-b.match_number);
   if(!ordered.length)return '<div class="empty">対戦枠がありません。</div>';
