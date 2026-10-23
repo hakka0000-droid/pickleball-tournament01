@@ -2683,6 +2683,8 @@ function manage(){
  const sysAdmin=state.systemAdminLoaded&&state.systemAdmin&&!state.systemAdminError;
  const tournamentSection=sysAdmin?newTournamentCreationSection():'';
  const allowed=state.tournaments.filter(t=>state.tournamentAdminIds.includes(t.id));
+ // No tournaments: the only dropdown option is new creation, so show its form automatically.
+ if(allowed.length===0&&sysAdmin)prepCreatingTournament=true;
  if(!allowed.some(t=>t.id===categoryForm.tournamentId))categoryForm.tournamentId=allowed[0]?.id||'';
  // One tournament selection controls all preparation subpages.
  // Discard an imported file preview if its destination changes; never import into another tournament.
