@@ -196,6 +196,25 @@
 .basic-panel-content .court-capacity-cell small{font-size:.74rem;line-height:1.4;color:#687b86}
 .basic-panel-content .court-capacity-note{font-size:.85rem;color:#687b86;margin:14px 0 0}
 @media(max-width:360px){.basic-panel-content .court-register-row .btn{min-width:78px}.basic-panel-content .court-capacity-cell small{font-size:.67rem}}
+
+/* Step 439: category capacity settings, results, and save areas */
+.capacity-category-card{display:flex;flex-direction:column;gap:18px}
+.capacity-category-card>h3{font-size:1.08rem;margin:0}
+.capacity-category-card h4{font-size:.91rem;margin:0 0 12px;color:#213f4c}
+.capacity-input-block,.capacity-save-block{min-width:0}
+.capacity-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+.capacity-field{min-width:0}
+.capacity-field label{margin-bottom:7px}
+.capacity-field .field{width:100%;max-width:100%;min-width:0}
+.capacity-readonly{padding:11px 12px;background:#f3f6f7;border-radius:10px;color:#506876;min-height:46px;line-height:1.5}
+.capacity-result{background:#f3f7f8;border:1px solid #d9e4e8;border-radius:12px;padding:15px;min-width:0}
+.capacity-result-line{margin:7px 0;color:#536c79;font-size:.88rem;line-height:1.55}
+.capacity-result-count{display:flex;flex-direction:column;gap:7px;border-top:1px solid #d9e4e8;padding-top:12px;margin-top:12px;font-size:.88rem;line-height:1.5}
+.capacity-result-count strong{font-size:1.23rem;color:#203c49}
+.capacity-save-block{border-top:1px solid #e6edef;padding-top:15px}
+.capacity-save-status{margin-bottom:12px}
+.capacity-save-button{display:block;width:100%;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+@media(min-width:760px){.capacity-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.capacity-save-button{width:auto;min-width:270px}}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
@@ -602,7 +621,9 @@ function capacityPlanningSection(t,categories,availableSlots){
   const status=dirty?'未保存の変更あり':saved?'DBに保存済み':'未保存（初期値）';
   const published=t.status==='published';
   const canSave=['draft','published'].includes(t.status)&&state.staff&&state.tournamentAdminIds.includes(t.id)&&(published||!!result)&&!saving&&!state.loading&&!state.error&&!state.tournamentAdminError;
-  return `<div class="card stack"><h3>${esc(c.name)}</h3><div class="grid"><div><label for="planPairs-${esc(c.id)}">募集ペア数（3〜64）</label><input id="planPairs-${esc(c.id)}" class="field" type="number" min="3" max="64" step="1" inputmode="numeric" data-plan-pairs="${esc(c.id)}" value="${esc(plan.pairs)}"></div><div><label for="planGroupSize-${esc(c.id)}">1グループの最大ペア数（全組共通）</label><select id="planGroupSize-${esc(c.id)}" class="field" data-plan-group-size="${esc(c.id)}" ${published?'disabled':''}>${[3,4,5,6].map(n=>opt(String(n),`${n}ペア`,plan.groupSize)).join('')}</select></div><div><label for="planAdvance-${esc(c.id)}">各予選組の決勝進出数</label><select id="planAdvance-${esc(c.id)}" class="field" data-plan-advance="${esc(c.id)}" ${published?'disabled':''}>${opt('1','上位1ペア',plan.advance)}${opt('2','上位2ペア',plan.advance)}</select></div><div><label>決勝形式（自動）</label><p class="prompt">${result?(result.sizes.length===1?'予選1組：決勝なし':result.finalFormat==='round_robin'?'3ペア：総当たり3試合':result.qualifiers===4?'4ペア：準決勝・決勝・3位決定戦':'2ペア：決勝1試合'):'募集ペア数・組人数・進出数を確認してください'}</p></div></div>${published?'<p class="notice blue">公開済み大会：募集上限だけ編集できます。参加ペア数・対戦表・時間割は変わりません。組人数・進出人数・決勝方式の変更は、別工程で安全な再生成機能を実装してから対応します。</p>':''}${published?'':result?`<p class="prompt">予選リーグ：${esc(result.sizes.join('・'))}ペア（${result.sizes.length}組）</p><div class="row"><span>予選 ${result.preliminary}試合 ＋ 決勝（${result.finalFormat==='round_robin'?'総当たり':'シングルエリミネーション'}）${result.knockout}試合</span><b>${result.total}試合</b></div>${result.sizes.length===1?'<p class="prompt">予選1組のため決勝は行いません。</p>':''}`:'<div class="empty-error">選択した最大ペア数では全組3ペア以上に均等配分できません。募集ペア数かグループ人数を変更してください。</div>'}<div class="row" style="flex-wrap:wrap"><span class="status ${dirty?'pending':saved?'done':''}">${esc(status)}</span><button class="btn mini-btn" data-save-capacity="${esc(c.id)}" ${canSave?'':'disabled'}>${saving?'保存中…':'このカテゴリーの募集枠を保存'}</button></div>${capacityPlanMessages[key]?`<p class="${capacityPlanMessages[key].ok?'notice blue':'empty-error'}" role="status">${esc(capacityPlanMessages[key].text)}</p>`:''}${!['draft','published'].includes(t.status)?'<p class="prompt">この大会状態では募集上限を変更できません。</p>':''}</div>`;
+  const finalLabel = result ? (result.sizes.length===1?'予選1組：決勝なし':result.finalFormat==='round_robin'?'3ペア：総当たり3試合':result.qualifiers===4?'4ペア：準決勝・決勝・3位決定戦':'2ペア：決勝1試合') : '募集ペア数・組人数・進出数を確認してください';
+  const resultBlock = published ? '<p class="notice blue">公開済み大会：募集上限のみ編集できます。試合・時間割には影響しません。</p>' : result ? `<section class="capacity-result" aria-label="自動計算結果"><h4>自動計算結果</h4><p class="capacity-result-line">予選リーグ：${esc(result.sizes.join('・'))}ペア（${result.sizes.length}組）</p><p class="capacity-result-line">決勝形式：${esc(finalLabel)}</p><div class="capacity-result-count"><span>予選 ${result.preliminary}試合 ＋ 決勝 ${result.knockout}試合</span><strong>合計 ${result.total}試合</strong></div></section>` : '<div class="empty-error">各組を3ペア以上にできません。募集ペア数かグループ人数を変更してください。</div>';
+  return `<div class="card stack capacity-category-card"><h3>${esc(c.name)}</h3><section class="capacity-input-block"><h4>募集設定</h4><div class="capacity-fields"><div class="capacity-field"><label for="planPairs-${esc(c.id)}">募集ペア数（3〜64）</label><input id="planPairs-${esc(c.id)}" class="field" type="number" min="3" max="64" step="1" inputmode="numeric" data-plan-pairs="${esc(c.id)}" value="${esc(plan.pairs)}"></div><div class="capacity-field"><label for="planGroupSize-${esc(c.id)}">1グループの最大ペア数（全組共通）</label><select id="planGroupSize-${esc(c.id)}" class="field" data-plan-group-size="${esc(c.id)}" ${published?'disabled':''}>${[3,4,5,6].map(n=>opt(String(n),`${n}ペア`,plan.groupSize)).join('')}</select></div><div class="capacity-field"><label for="planAdvance-${esc(c.id)}">各予選組の決勝進出数</label><select id="planAdvance-${esc(c.id)}" class="field" data-plan-advance="${esc(c.id)}" ${published?'disabled':''}>${opt('1','上位1ペア',plan.advance)}${opt('2','上位2ペア',plan.advance)}</select></div><div class="capacity-field"><label>決勝形式（自動）</label><div class="capacity-readonly">${esc(finalLabel)}</div></div></div></section>${resultBlock}<section class="capacity-save-block"><h4>保存</h4><div class="capacity-save-status"><span class="status ${dirty?'pending':saved?'done':''}">${esc(status)}</span></div><button class="btn capacity-save-button" data-save-capacity="${esc(c.id)}" ${canSave?'':'disabled'}>${saving?'保存中…':'このカテゴリーの募集枠を保存'}</button></section>${capacityPlanMessages[key]?`<p class="${capacityPlanMessages[key].ok?'notice blue':'empty-error'}" role="status">${esc(capacityPlanMessages[key].text)}</p>`:''}${!['draft','published'].includes(t.status)?'<p class="prompt">この大会状態では募集上限を変更できません。</p>':''}</div>`;
  });
  if(t.status==='published')return `<h2>公開後の募集上限変更</h2><div class="notice blue">ここでは募集の上限値だけ保存します。新たな参加ペアの登録や試合・時間割の再生成は行いません。</div>${cards.join('')}`;
  const results=categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return planGroupings(p.pairs,p.advance,p.groupSize,p.finalFormat||'knockout')});
