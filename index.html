@@ -1154,7 +1154,7 @@ function updateMatchListResults(){
  const rows=searchedMatches().sort((a,b)=>sortClock(a)-sortClock(b)||courtName(a.court_id).localeCompare(courtName(b.court_id),'ja',{numeric:true})||matchCode(a).localeCompare(matchCode(b),'ja',{numeric:true}));
  count.textContent=`${rows.length} / ${visibleMatches().length} 試合を表示`;
  if(matchView==='court'){
-  const keys=[...new Set(rows.map(m=>m.court_id).filter(Boolean))];
+  const keys=[...new Set(rows.map(m=>m.court_id).filter(Boolean))].sort((a,b)=>courtName(a).localeCompare(courtName(b),'ja',{numeric:true}));
   results.innerHTML=keys.map(k=>`<h2>${esc(courtName(k))}</h2><div class="grid">${rows.filter(m=>m.court_id===k).map(matchCard).join('')}</div>`).join('')+(rows.some(m=>!m.court_id)?`<h2>コート未割当</h2><div class="grid">${rows.filter(m=>!m.court_id).map(matchCard).join('')}</div>`:'')||'<div class="empty">該当試合がありません。</div>';
  }else{
   results.innerHTML=rows.map(matchCard).join('')||'<div class="empty">該当試合がありません。</div>';
