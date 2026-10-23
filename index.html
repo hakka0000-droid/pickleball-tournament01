@@ -2569,7 +2569,7 @@ async function resetCategoryPreparation(type){
  finally{preparationReset.busy=false;render();}
 }
 
-const basicOpenPanels={settings:true,courts:false,categories:true,capacity:false,windows:false};
+const basicOpenPanels={settings:false,courts:false,categories:false,capacity:false,windows:false};
 function nextCategoryDisplayOrder(categories){
  const used=new Set(categories.map(c=>Number(c.display_order)).filter(n=>Number.isInteger(n)&&n>=0&&n<=1000));
  for(let n=0;n<=1000;n++)if(!used.has(n))return n;
