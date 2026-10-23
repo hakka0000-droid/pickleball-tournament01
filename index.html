@@ -1088,7 +1088,7 @@ function officialPanel(categoryId,slots,stageId){
  const ready=!!calculated&&slots.length>0&&stageMatches.length===slots.length&&stageMatches.every(m=>(isDone(m)&&m.score_a!==m.score_b)||(isWalkover(m)&&m.walkover_winner_pair_id));
  const admin=result?.is_admin===true;
  const actions=!state.staff?'':locked?(admin?`<button class="btn secondary" data-official-revoke="${esc(categoryId)}">正式確定を取り消す</button>`:'<span class="prompt">確定取消は大会管理者のみ可能です。</span>'):`<button class="btn" data-official-confirm="${esc(categoryId)}" ${ready?'':'disabled'}>優勝・準優勝を正式確定</button>`;
- return `<div class="official-panel ${locked?'confirmed':''}"><div class="official-head"><b>カテゴリー正式結果</b><span class="status ${locked?'done':'pending'}">${esc(status)}</span></div><div class="official-ranks"><div class="official-rank"><span>優勝</span><b>${esc(first?pairName(first):'未確定')}</b></div><div class="official-rank"><span>準優勝</span><b>${esc(second?pairName(second):'未確定')}</b></div></div><p class="prompt">${locked?'正式結果として登録済みです。試合・対戦枠はDB側で編集保護されています。':ready?'画面上の候補です。確定時にはサーバー側で再検証されます。':'全試合の結果がそろうまで正式確定はできません。'}</p><div class="official-actions">${actions}</div></div>`;
+ return `<div class="official-panel ${locked?'confirmed':''}"><div class="official-head"><b>正式結果</b><span class="status ${locked?'done':'pending'}">${esc(status)}</span></div><div class="official-ranks"><div class="official-rank"><span>優勝</span><b>${esc(first?pairName(first):'未確定')}</b></div><div class="official-rank"><span>準優勝</span><b>${esc(second?pairName(second):'未確定')}</b></div></div><p class="prompt">${locked?'正式確定済みです。':ready?'確定前の候補です。':'全試合の終了後に確定できます。'}</p><div class="official-actions">${actions}</div></div>`;
 }
 const winnerName=m=>isWalkover(m)?pairName(m.walkover_winner_pair_id):isDone(m)?pairName(m.score_a>m.score_b?m.pair_a_id:m.pair_b_id):'';
 function areaOf(tab){return tab==='manage'?'prep':tab.startsWith('public_')?'public':'ops';}
@@ -3173,7 +3173,7 @@ function slotDiagram(slots,cat,stage){
     const label=isThirdPlaceMatch(m)?'3位決定戦':s.round_number===highest?'決勝':s.round_number===highest-1?'準決勝':`${s.round_number}回戦`;
     return `<div class="bracket-match ${s.round_number===highest&&winner?'final-winner':''}" style="left:${x}px;top:${y}px"><div class="bracket-head"><span>${matchCode(m)?`<b class="match-number">${esc(matchCode(m))}</b> ／ `:''}${esc(label)} ${s.match_number}</span><span>${isWalkover(m)?'不戦勝':isDone(m)?'終了':m.status==='playing'?'試合中':'予定'}</span></div>${line(m.pair_a_id,m.score_a)}${line(m.pair_b_id,m.score_b)}${state.staff&&!officialLocked(m.category_id)&&m.pair_a_id&&m.pair_b_id?`<button class="btn secondary" data-edit="${esc(m.id)}">結果を操作</button>`:''}</div>`;
   }).join('');
-  return `<div class="bracket-legend"><span>緑：勝者</span><span>線：次ラウンドへの接続</span><span>横スクロールで全ラウンド表示</span></div><div class="bracket-scroller"><div class="bracket-board" style="width:${boardWidth}px;height:${boardHeight}px"><svg class="bracket-lines" width="${boardWidth}" height="${boardHeight}" viewBox="0 0 ${boardWidth} ${boardHeight}" aria-hidden="true">${path}</svg>${cards}</div></div>`;
+  return `<div class="bracket-legend"><span>緑：勝者</span><span>線：次の対戦</span></div><div class="bracket-scroller"><div class="bracket-board" style="width:${boardWidth}px;height:${boardHeight}px"><svg class="bracket-lines" width="${boardWidth}" height="${boardHeight}" viewBox="0 0 ${boardWidth} ${boardHeight}" aria-hidden="true">${path}</svg>${cards}</div></div>`;
 }
 function championSummary(slots) {
   if (!slots.length) return '';
@@ -3189,9 +3189,9 @@ function championSummary(slots) {
       ? (finalMatch.score_a>finalMatch.score_b?finalMatch.pair_a_id:finalMatch.pair_b_id)
       : null;
   const valid=winnerId&&(winnerId===finalMatch.pair_a_id||winnerId===finalMatch.pair_b_id);
-  if (!valid) return `<div class="champion-panel champion-pending" aria-label="優勝ペア未確定"><div class="champion-kicker">🏆 優勝ペア：未確定</div><p class="champion-caption">決勝戦の結果が保存されると、ここに勝者を表示します。</p></div>`;
+  if (!valid) return `<div class="champion-panel champion-pending" aria-label="優勝ペア未確定"><div class="champion-kicker">🏆 優勝ペア：未確定</div><p class="champion-caption">決勝戦の結果登録後に表示します。</p></div>`;
   const score=isWalkover(finalMatch)?'決勝：不戦勝':`決勝：${finalMatch.score_a} – ${finalMatch.score_b}`;
-  return `<div class="champion-panel" aria-label="決勝結果から算出した優勝ペア"><div class="champion-kicker">🏆 CHAMPION · 優勝ペア</div><div class="champion-name">${esc(pairName(winnerId))}</div><div class="champion-result">${esc(score)}</div><p class="champion-caption">決勝戦の保存結果から自動表示しています。大会の正式な結果承認・確定を示すものではありません。</p></div>`;
+  return `<div class="champion-panel" aria-label="決勝結果から算出した優勝ペア"><div class="champion-kicker">🏆 CHAMPION · 優勝ペア</div><div class="champion-name">${esc(pairName(winnerId))}</div><div class="champion-result">${esc(score)}</div><p class="champion-caption">試合結果から算出した表示です（正式確定前）。</p></div>`;
 }
 function bracket(){
   const ms=visibleMatches().filter(m=>stageFor(m)?.stage_type==='knockout');
@@ -3201,7 +3201,7 @@ function bracket(){
     const slots=state.bracketSlots.filter(s=>s.stage_id===stageId);
     return `<section class="bracket-stage"><h2>${esc(catName(stage?.category_id))} / ${esc(stage?.name||'決勝トーナメント')}</h2>${slots.length?championSummary(slots):''}${officialPanel(stage?.category_id,slots,stageId)}${slots.length?slotDiagram(slots,stage?.category_id,stageId):`<div class="notice">対戦枠の読み取りができません。表示用RPCを設定するか「更新」を押してください。<br><small>${esc(state.bracketError)}</small></div><div class="grid">${ms.filter(m=>m.stage_id===stageId).map(matchCard).join('')}</div>`}</section>`;
   }).join('');
-  return `${controls()}<h2>決勝トーナメント</h2><div class="notice blue">対戦表はSupabaseの確定データを表示します。変更後は「更新」を押してください。スタッフは対戦カードから結果を操作できます。</div>${diagrams||'<div class="empty">決勝トーナメントの試合はまだありません。</div>'}`;
+  return `${controls()}<h2>決勝トーナメント</h2>${diagrams||'<div class="empty">決勝トーナメントの試合はまだありません。</div>'}`;
 }
 // Server-calculated preliminary rankings (including walkovers and true shared ranks).
 const groupKey=(cat,group)=>cat+'::'+group;
@@ -3237,11 +3237,11 @@ async function refreshRankings(){
  finally{state.rankingLoading=false;render()}
 }
 function rankingViewSwitch(){return `<div class="match-view-switch" role="group" aria-label="順位・決勝の表示形式"><button type="button" data-ranking-view="preliminary" class="${rankingView==='preliminary'?'selected':''}" aria-pressed="${rankingView==='preliminary'}">予選</button><button type="button" data-ranking-view="final" class="${rankingView==='final'?'selected':''}" aria-pressed="${rankingView==='final'}">決勝</button></div>`;}
-function rankingPage(){return rankingView==='final'?bracket().replace('<h2>決勝トーナメント</h2>',`<h2>順位・決勝</h2>${rankingViewSwitch()}<h2>決勝トーナメント</h2>`):ranking().replace('<h2>予選順位・承認管理</h2>',`<h2>順位・決勝</h2>${rankingViewSwitch()}<h2>予選順位・承認管理</h2>`);}
+function rankingPage(){return rankingView==='final'?bracket().replace('<h2>決勝トーナメント</h2>',`<h2>順位・決勝</h2>${rankingViewSwitch()}`):ranking().replace('<h2>予選順位・承認管理</h2>',`<h2>順位・決勝</h2>${rankingViewSwitch()}`);}
 function ranking(){
  const groups=rankingGroups(),cats=[...new Set(groups.map(g=>g.cat))];
  const loading=state.rankingLoading||!state.approvedLoaded;
- const banner=state.approvedError?`<div class="empty-error">順位の取得に失敗しました：${esc(state.approvedError)}。更新してください。</div>`:loading?'<div class="notice blue">Supabaseで順位・承認状態を確認しています…</div>':'<div class="notice blue">順位はSupabaseの公式計算RPCから取得しています。不戦勝も勝敗に反映します。承認・手動解決はサーバー側で再検証されます。</div>';
+ const banner=state.approvedError?`<div class="empty-error">順位の取得に失敗しました：${esc(state.approvedError)}。更新してください。</div>`:loading?'<p class="prompt">順位を読み込み中…</p>':'';
  return `${controls()}<h2>予選順位・承認管理</h2>${banner}${cats.map(cat=>`<h2>${esc(catName(cat))}</h2>${groups.filter(g=>g.cat===cat).map(g=>{
   const rows=state.rankingRows[g.key]||[],err=state.rankingLoadErrors[g.key];
   const approved=state.approved.filter(x=>x.category_id===g.cat&&x.group_name===g.group);
@@ -3255,8 +3255,8 @@ function ranking(){
   const ready=!loading&&!err&&complete&&rows.length>=2&&rows.length===active.length&&approved.length===0;
   const status=approved.length?'正式承認済み':!complete?'試合未終了':tied?'同順位あり':'未承認';
   const rowsDisplay=[...rows].sort((a,b)=>(approvedMap.get(a.pair_id)??Number(a.rank))-(approvedMap.get(b.pair_id)??Number(b.rank))||Number(a.rank)-Number(b.rank)||pairName(a.pair_id).localeCompare(pairName(b.pair_id)));
-  const actions=!state.staff||loading||err?'':approved.length?`<button class="btn secondary mini-btn" data-ranking-revoke="${esc(g.key)}" ${qualified||!lockKnown?'disabled':''}>承認を取り消す</button>`:tied?`<button class="btn mini-btn" data-ranking-resolve="${esc(g.key)}" ${ready?'':'disabled'}>同順位を手動解決（管理者）</button>`:`<button class="btn mini-btn" data-ranking-approve="${esc(g.key)}" ${ready?'':'disabled'}>順位を正式承認</button>`;
-  return `<section class="card"><div class="row"><h3>${esc(g.group)}組</h3><span class="status ${approved.length?'done':complete?'pending':''}">${esc(status)}</span></div>${err?`<div class="empty-error">順位取得エラー：${esc(err)}</div>`:loading?'<p class="prompt">読み込み中…</p>':`<div class="tablebox"><table class="tbl"><thead><tr><th>順位</th><th>ペア</th><th>勝</th><th>負</th><th>得失点</th><th>総得点</th><th>試合</th></tr></thead><tbody>${rowsDisplay.map(r=>`<tr><td><b>${esc(approvedMap.get(r.pair_id)??r.rank)}位</b>${!approved.length&&rows.filter(x=>Number(x.rank)===Number(r.rank)).length>1?' <span class="status pending">同順位</span>':''}</td><td>${esc(r.pair_name||pairName(r.pair_id))}</td><td>${Number(r.wins)}</td><td>${Number(r.losses)}</td><td>${Number(r.point_difference)}</td><td>${Number(r.points_scored)}</td><td>${Number(r.played)}</td></tr>`).join('')||'<tr><td colspan="7">順位データがありません</td></tr>'}</tbody></table></div>`}<div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="prompt">${g.games.filter(m=>isDone(m)||isWalkover(m)).length}/${g.games.length}試合終了${qualified?' ／ 決勝進出者確定済み':''}</span>${actions}</div>${approved.length&&(qualified||!lockKnown)?`<p class="prompt">${qualified?'決勝進出者が確定済みのため、順位承認を取り消せません。':'決勝進出者の確定状態を確認できないため、承認取消を停止しています。'+esc(state.qualificationLocksError)}</p>`:''}</section>`;
+  const actions=!state.staff||loading||err?'':approved.length?`<button class="btn secondary mini-btn" data-ranking-revoke="${esc(g.key)}" ${qualified||!lockKnown?'disabled':''}>承認を取り消す</button>`:tied?`<button class="btn mini-btn" data-ranking-resolve="${esc(g.key)}" ${ready?'':'disabled'}>同順位を解決</button>`:`<button class="btn mini-btn" data-ranking-approve="${esc(g.key)}" ${ready?'':'disabled'}>順位を承認</button>`;
+  return `<section class="card"><div class="row"><h3>${esc(g.group)}組</h3><span class="status ${approved.length?'done':complete?'pending':''}">${esc(status)}</span></div>${err?`<div class="empty-error">順位取得エラー：${esc(err)}</div>`:loading?'<p class="prompt">読み込み中…</p>':`<div class="tablebox"><table class="tbl"><thead><tr><th>順位</th><th>ペア</th><th>勝敗</th><th>得失点</th></tr></thead><tbody>${rowsDisplay.map(r=>`<tr><td><b>${esc(approvedMap.get(r.pair_id)??r.rank)}位</b>${!approved.length&&rows.filter(x=>Number(x.rank)===Number(r.rank)).length>1?' <span class="status pending">同順位</span>':''}</td><td>${esc(r.pair_name||pairName(r.pair_id))}</td><td>${Number(r.wins)}勝${Number(r.losses)}敗</td><td>${Number(r.point_difference)>0?'+':''}${Number(r.point_difference)}</td></tr>`).join('')||'<tr><td colspan="4">順位データがありません</td></tr>'}</tbody></table></div>`}<div class="row" style="margin-top:12px;flex-wrap:wrap"><span class="prompt">${g.games.filter(m=>isDone(m)||isWalkover(m)).length}/${g.games.length}試合終了${qualified?' ／ 決勝進出者確定済み':''}</span>${actions}</div>${approved.length&&(qualified||!lockKnown)?`<p class="prompt">${qualified?'決勝進出者が確定済みのため、順位承認を取り消せません。':'決勝進出者の確定状態を確認できないため、承認取消を停止しています。'+esc(state.qualificationLocksError)}</p>`:''}</section>`;
  }).join('')}${state.staff?qualifierPanel(cat):''}`).join('')||'<div class="empty">予選のグループ別試合はまだありません。</div>'}`;
 }
 // Simplified v10: confirm existing knockout qualifiers without changing SQL functions.
@@ -3277,7 +3277,7 @@ function qualifierPanel(categoryId){
  const top=Number(settings.top_n_per_group),wild=Number(settings.wildcard_count);
  const expected=Number.isInteger(top)&&top>=1&&Number.isInteger(wild)&&wild>=0?approvedGroups.length*top+wild:null;
  const reason=stages.length!==1?'決勝ステージが1件登録されている必要があります。':!approvedReady?'各組の有効ペア全員の順位承認が必要です。':!state.qualificationLocksLoaded||state.qualificationLocksError?'確定状態を確認できません。更新してください。':!isAssignedTournamentStaff(tournamentId)?'この大会のスタッフ権限がありません。':!['published','in_progress'].includes(tournament?.status)?'公開中または進行中の大会のみ操作できます。':'順位・権限・通信の確認が完了していません。';
- return `<section class="card stack"><div class="row"><h3>決勝進出者</h3><span class="status ${locked?'done':'pending'}">${locked?'確定済み':'未確定'}</span></div>${stages.length===1?`<p class="prompt">${esc(stages[0].name)} ／ 各組上位 ${esc(Number.isFinite(top)?top:'未設定')}ペア ／ ワイルドカード ${esc(Number.isFinite(wild)?wild:'未設定')}ペア ／ 予定 ${esc(expected??'未設定')}ペア</p>`:''}${locked?'<div class="notice blue">進出者は確定済みです。重複確定はできません。</div>':`<button type="button" class="btn wide" data-qualifier-preview="${esc(categoryId)}" ${ready&&expected!==null?'':'disabled'}>${qualifierUi.busy&&qualifierUi.categoryId===categoryId?'確認・保存中…':'決勝進出候補を確認'}</button>${ready&&expected!==null?'':`<p class="prompt">${esc(reason)}</p>`}`}${qualifierUi.categoryId===categoryId&&qualifierUi.message?`<p class="${qualifierUi.ok?'notice blue':'empty-error'}" role="status">${esc(qualifierUi.message)}</p>`:''}</section>`;
+ return `<section class="card stack"><div class="row"><h3>決勝進出者</h3><span class="status ${locked?'done':'pending'}">${locked?'確定済み':'未確定'}</span></div>${stages.length===1?`<p class="prompt">各組上位${esc(Number.isFinite(top)?top:'未設定')}ペア${wild>0?' ＋ ワイルドカード'+esc(wild)+'ペア':''}（計${esc(expected??'未設定')}ペア）</p>`:''}${locked?'<p class="prompt">進出者を確定しました。</p>':`<button type="button" class="btn wide" data-qualifier-preview="${esc(categoryId)}" ${ready&&expected!==null?'':'disabled'}>${qualifierUi.busy&&qualifierUi.categoryId===categoryId?'確認・保存中…':'決勝進出候補を確認'}</button>${ready&&expected!==null?'':`<p class="prompt">${esc(reason)}</p>`}`}${qualifierUi.categoryId===categoryId&&qualifierUi.message?`<p class="${qualifierUi.ok?'notice blue':'empty-error'}" role="status">${esc(qualifierUi.message)}</p>`:''}</section>`;
 }
 async function confirmKnockoutQualifiers(categoryId){
  if(qualifierUi.busy)return;
@@ -3333,8 +3333,8 @@ async function confirmKnockoutQualifiers(categoryId){
 function targetRankingGroup(key){return rankingGroups().find(g=>g.key===key)}
 async function approveRanking(key){
  const g=targetRankingGroup(key);if(!g||!state.staff||!state.approvedLoaded)return;
- if(!confirm(`${catName(g.cat)} / ${g.group}組の順位を正式承認しますか？\n承認前に全試合の結果を確認してください。`))return;
- try{const {error}=await client.rpc('staff_approve_group',{p_category_id:g.cat,p_group_name:g.group});if(error)throw error;await loadData();alert('順位を正式承認しました。')}catch(e){alert('順位を承認できませんでした：'+e.message);await loadData()}
+ if(!confirm(`${catName(g.cat)} / ${g.group}組の順位を承認しますか？\n承認前に全試合の結果を確認してください。`))return;
+ try{const {error}=await client.rpc('staff_approve_group',{p_category_id:g.cat,p_group_name:g.group});if(error)throw error;await loadData();alert('順位を承認しました。')}catch(e){alert('順位を承認できませんでした：'+e.message);await loadData()}
 }
 async function revokeRanking(key){
  const g=targetRankingGroup(key);if(!g||!state.staff||!state.approvedLoaded)return;
@@ -3359,7 +3359,7 @@ function resolveRankingModal(key){
   const ordered=[];for(const rank of [...new Set(rows.map(r=>Number(r.rank)))] ){ordered.push(...(tieByRank.get(rank)||rows.filter(r=>Number(r.rank)===rank).map(r=>r.pair_id)))}
   if(!confirm('選択した順序で順位を正式確定しますか？\n調整理由は監査履歴に記録されます。'))return;
   const b=$('saveRankingResolution');b.disabled=true;
-  try{const {error}=await client.rpc('admin_resolve_group_ranking_ties',{p_category_id:g.cat,p_group_name:g.group,p_ordered_pair_ids:ordered,p_reason:reason});if(error)throw error;closeModal();await loadData();alert('同順位を解決し、順位を正式承認しました。')}catch(e){if($('rankingMsg')){$('rankingMsg').textContent='確定に失敗しました：'+e.message;$('rankingMsg').classList.remove('hide')}if(b.isConnected)b.disabled=false;await refreshRankings()}
+  try{const {error}=await client.rpc('admin_resolve_group_ranking_ties',{p_category_id:g.cat,p_group_name:g.group,p_ordered_pair_ids:ordered,p_reason:reason});if(error)throw error;closeModal();await loadData();alert('同順位を解決し、順位を承認しました。')}catch(e){if($('rankingMsg')){$('rankingMsg').textContent='確定に失敗しました：'+e.message;$('rankingMsg').classList.remove('hide')}if(b.isConnected)b.disabled=false;await refreshRankings()}
  };
 }
 // STEP 277: XLSX/CSV import preview and one atomic admin_import_pairs RPC.
