@@ -1127,7 +1127,9 @@ function searchedMatches(){
  return visibleMatches().filter(m=>{
   if(matchListFilter.pendingOnly&&(isDone(m)||isWalkover(m)||m.status==='cancelled'))return false;
   if(!query)return true;
-  return matchCode(m).toUpperCase()===query;
+  if(matchCode(m).toUpperCase()===query)return true;
+  const nameQuery=String(matchListFilter.query||'').trim().toLocaleLowerCase('ja').replace(/\s+/g,'');
+  return [pairName(m.pair_a_id),pairName(m.pair_b_id)].some(name=>String(name||'').toLocaleLowerCase('ja').replace(/\s+/g,'').includes(nameQuery));
  });
 }
 function updateMatchListResults(){
@@ -3105,7 +3107,7 @@ async function createTournament(e){
 }
 
 function matchViewSwitch(){return `<div class="match-view-switch" role="group" aria-label="試合の表示形式"><button type="button" data-match-view="list" class="${matchView==='list'?'selected':''}" aria-pressed="${matchView==='list'}">時間別</button><button type="button" data-match-view="court" class="${matchView==='court'?'selected':''}" aria-pressed="${matchView==='court'}">コート別</button></div>`;}
-function matches(){if(matchView==='court')return courts();return `${controls()}<h2>試合・結果</h2>${matchViewSwitch()}<div class="match-search-controls"><label for="matchNumberSearch">試合番号で検索</label><div class="match-search-bar"><input class="field" id="matchNumberSearch" type="search" inputmode="search" autocomplete="off" placeholder="例：M-001" value="${esc(matchListFilter.query)}"><button class="btn secondary mini-btn" id="clearMatchSearch" type="button">クリア</button></div><label class="match-filter-check"><input type="checkbox" id="pendingMatchesOnly" ${matchListFilter.pendingOnly?'checked':''}>結果未入力の試合のみ表示</label></div><p class="match-filter-summary" id="matchSearchCount"></p><div class="grid" id="matchSearchResults"></div><details class="card"><summary><b>ペア別検索</b></summary>${pairs(true)}</details>`}
+function matches(){if(matchView==='court')return courts();return `${controls()}<h2>試合・結果</h2>${matchViewSwitch()}<div class="match-search-controls"><label for="matchNumberSearch">試合番号・ペア名・選手名で検索</label><div class="match-search-bar"><input class="field" id="matchNumberSearch" type="search" inputmode="search" autocomplete="off" placeholder="試合番号・ペア名・選手名" value="${esc(matchListFilter.query)}"><button class="btn secondary mini-btn" id="clearMatchSearch" type="button">クリア</button></div><label class="match-filter-check"><input type="checkbox" id="pendingMatchesOnly" ${matchListFilter.pendingOnly?'checked':''}>結果未入力の試合のみ表示</label></div><p class="match-filter-summary" id="matchSearchCount"></p><div class="grid" id="matchSearchResults"></div><details class="card"><summary><b>ペア別検索</b></summary>${pairs(true)}</details>`}
 function courts(){const ms=visibleMatches(),keys=[...new Set(ms.map(m=>m.court_id).filter(Boolean))];return `${controls()}<h2>試合・結果</h2>${matchViewSwitch()}${keys.map(k=>`<h2>${esc(courtName(k))}</h2><div class="grid">${ms.filter(m=>m.court_id===k).sort((a,b)=>timeOf(a).localeCompare(timeOf(b))).map(matchCard).join('')}</div>`).join('')||'<div class="empty">コート割当済みの試合はありません。</div>'}${ms.some(m=>!m.court_id)?`<h2>コート未割当</h2><div class="grid">${ms.filter(m=>!m.court_id).map(matchCard).join('')}</div>`:''}`}
 function slotDiagram(slots,cat,stage){
   const ordered=[...slots].sort((a,b)=>a.round_number-b.round_number||a.match_number-b.match_number);
