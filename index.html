@@ -520,15 +520,18 @@ function changeWindowClock(t,c,field,part,value){
  const cat=state.categories.find(x=>x.id===c&&x.tournament_id===t);
  if(!cat)return;
  const current=getWindowDraft(t,cat)[field]||'';
- const oldHour=/^\d{2}:\d{2}$/.test(current)?current.slice(0,2):'';
- const oldMinute=/^\d{2}:\d{2}$/.test(current)?current.slice(3,5):'';
+ const k=windowKey(t,c);
+ const previous=windowClockPartial[k]?.[field];
+ const oldHour=previous?previous.hour:(/^\d{2}:\d{2}$/.test(current)?current.slice(0,2):'');
+ const oldMinute=previous?previous.minute:(/^\d{2}:\d{2}$/.test(current)?current.slice(3,5):'');
  const h=part==='hour'?value:oldHour;
  const m=part==='minute'?value:oldMinute;
- // Keep one partially picked value for the next selection; only valid HH:MM is sent to the RPC.
- const draftValue=h&&m?`${h}:${m}`:'';
- editScheduleWindow(t,c,field,draftValue);
- const k=windowKey(t,c),statePart=windowClockPartial[k]||(windowClockPartial[k]={});
+ // Preserve both picker values even when only one half has been chosen.
+ const statePart=windowClockPartial[k]||(windowClockPartial[k]={});
  statePart[field]={hour:h,minute:m};
+ // Only a complete HH:MM value enters the schedule draft / validation.
+ const draftValue=h!==''&&m!==''?`${h}:${m}`:'';
+ editScheduleWindow(t,c,field,draftValue);
 }
 const windowClockPartial={};
 const scheduleWindowOpenCards = new Set();
