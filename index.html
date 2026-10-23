@@ -437,6 +437,18 @@
 
 /* Reception: simple mobile-first list without an outer card or wide table. */
 .reception-filters{margin:14px 0;grid-template-columns:repeat(2,minmax(0,1fr))}.reception-filters>div{min-width:0}.reception-filters .field{width:100%;min-width:0;box-sizing:border-box}.reception-metrics{margin:18px 0}.reception-list{display:grid;gap:10px;margin:12px 0 22px}.reception-pair{border:1px solid #dce6ea;border-radius:12px;padding:14px;background:#fff;min-width:0}.reception-pair-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.reception-pair-head>div:first-child{min-width:0;overflow-wrap:anywhere}.reception-pair-head .prompt{margin:5px 0 0}.reception-badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}.reception-actions{display:flex;gap:9px;margin-top:12px}.reception-actions .btn{flex:1;min-width:0;white-space:normal}.reception-withdrawal{margin-top:12px}.reception-withdrawal .tablebox{margin:12px 0}@media(max-width:600px){.reception-pair-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.reception-badges{justify-content:flex-end;flex-shrink:0;margin-top:0}.reception-actions .btn{padding:12px 7px}}
+
+/* Compact match cards shared by time and court views */
+.match-compact{padding:13px 12px;min-width:0}
+.match-compact-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.match-compact-head .status{flex-shrink:0}
+.match-compact-teams{font-size:14px;font-weight:750;line-height:1.45;margin:12px 0 9px;overflow-wrap:anywhere}
+.match-compact-vs{color:#647584;font-size:12px;font-weight:600;margin:2px 0}
+.match-compact-meta{font-size:12px;color:#647584;line-height:1.5}
+.match-compact-score{color:#182f3c;margin-left:5px;white-space:nowrap}
+.match-compact-winner{font-size:12px;color:#516a7a;margin-top:5px;overflow-wrap:anywhere}
+.match-compact-actions{margin-top:10px}
+.match-compact-actions .btn{max-width:100%;white-space:normal}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
@@ -1149,7 +1161,15 @@ function updateMatchListResults(){
 function filteredCategories(){const allowed=areaOf(state.tab)==='ops'?opsPublishedIds():null;return state.categories.filter(c=>(!allowed||allowed.has(c.tournament_id))&&(state.tournament==='all'||c.tournament_id===state.tournament));}
 function controls(){const cats=filteredCategories();const allowed=areaOf(state.tab)==='ops'?opsPublishedIds():null;const ts=state.tournaments.filter(t=>!allowed||allowed.has(t.id));return `<div class="filters"><div><label>大会</label><select class="field" id="tournamentFilter">${opt('all','すべての公開済み大会',state.tournament)}${ts.map(t=>opt(t.id,t.name,state.tournament)).join('')}</select></div><div><label>カテゴリー</label><select class="field" id="categoryFilter">${opt('all','すべて',state.category)}${cats.map(c=>opt(c.id,c.name,state.category)).join('')}</select></div></div>`}
 function wireControls(){const t=$('tournamentFilter'),c=$('categoryFilter');if(t)t.onchange=()=>{state.tournament=t.value;state.category='all';render()};if(c)c.onchange=()=>{state.category=c.value;render()}}
-function matchCard(m){const pending=!m.pair_a_id||!m.pair_b_id;const done=isDone(m);const walk=isWalkover(m);return `<article class="card match"><div class="row"><span class="stage">${matchCode(m)?`<b class="match-number">${esc(matchCode(m))}</b> ／ `:''}${esc(catName(m.category_id))} / ${esc(stageLabel(m))}${m.group_name?' / '+esc(m.group_name)+'組':''}</span><span class="status ${done||walk?'done':pending?'pending':''}">${walk?'不戦勝':done?'結果登録済':pending?'対戦相手未確定':m.status==='playing'?'試合中':'予定'}</span></div><div class="teams">${esc(pairName(m.pair_a_id))}<br><span class="muted">vs</span><br>${esc(pairName(m.pair_b_id))}</div>${walk?`<p class="prompt">不戦勝：${esc(winnerName(m))}</p>`:''}<div class="row"><small class="muted">${esc(timeOf(m))}　コート ${esc(courtName(m.court_id))}</small>${done?`<span class="score mono">${m.score_a} - ${m.score_b}</span>`:''}</div>${state.staff&&stageFor(m)?.stage_type==='preliminary'&&preliminaryEditLocked(m)?`<p class="prompt">${state.qualificationLocks.includes(m.category_id)?'決勝進出者確定済み：予選結果の変更不可':'決勝進出者の確定状態を確認中・取得失敗：予選結果の編集を停止中'}</p>`:''}${state.staff&&!scoreEditLocked(m)&&(!pending||walk)?`<div class="row" style="margin-top:10px"><button class="btn secondary mini-btn" data-edit="${esc(m.id)}">${walk?'不戦勝を確認':done?'結果修正':'結果入力'}</button></div>`:''}</article>`}
+function matchCard(m){
+ const pending=!m.pair_a_id||!m.pair_b_id;
+ const done=isDone(m),walk=isWalkover(m);
+ const locked=state.staff&&stageFor(m)?.stage_type==='preliminary'&&preliminaryEditLocked(m);
+ const label=walk?'不戦勝':done?'結果登録済':pending?'対戦相手未確定':m.status==='playing'?'試合中':'予定';
+ const court=m.court_id?`コート ${esc(courtName(m.court_id))}`:'コート未割当';
+ const clock=esc(timeOf(m));
+ return `<article class="card match match-compact"><div class="match-compact-head"><b class="match-number">${esc(matchCode(m)||'試合')}</b><span class="status ${done||walk?'done':pending?'pending':''}">${label}</span></div><div class="match-compact-teams"><div>${esc(pairName(m.pair_a_id))}</div><div class="match-compact-vs">vs</div><div>${esc(pairName(m.pair_b_id))}</div></div><div class="match-compact-meta">${clock} · ${court}${done?` <strong class="match-compact-score">${esc(m.score_a)} - ${esc(m.score_b)}</strong>`:''}</div>${walk?`<div class="match-compact-winner">勝者：${esc(winnerName(m))}</div>`:''}${locked?`<p class="prompt">${state.qualificationLocks.includes(m.category_id)?'決勝進出者確定済み：予選結果の変更不可':'決勝進出者の確定状態を確認中・取得失敗：予選結果の編集を停止中'}</p>`:''}${state.staff&&!scoreEditLocked(m)&&(!pending||walk)?`<div class="match-compact-actions"><button class="btn secondary mini-btn" data-edit="${esc(m.id)}">${walk?'不戦勝を確認':done?'結果修正':'結果入力'}</button></div>`:''}</article>`;
+}
 function home(){
  const ms=visibleMatches();
  const done=ms.filter(m=>isDone(m)||isWalkover(m)).length;
