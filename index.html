@@ -1044,7 +1044,7 @@ const stageLabel=m=>({preliminary:'予選',knockout:'決勝トーナメント',p
 const courtName=id=>state.courts.find(c=>c.id===id)?.name||(id?String(id):'未割当');
 const matchCode=m=>state.matchNumbers[m.id]||'';
 
-const timeOf=m=>m.start_time?new Date(m.start_time).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):(m.scheduled_hhmm||'時刻未設定');
+const timeOf=m=>m.start_time?new Date(m.start_time).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}):(m.scheduled_hhmm||'時刻未設定');
 const isDone=m=>m.status==='completed'&&m.score_a!=null&&m.score_b!=null;
 const isWalkover=m=>m.status==='walkover';
 const officialFor=categoryId=>state.officialResults.find(r=>r.category_id===categoryId);
@@ -1135,7 +1135,7 @@ function searchedMatches(){
 function updateMatchListResults(){
  const results=$('matchSearchResults'),count=$('matchSearchCount');
  if(!results||!count)return;
- const rows=searchedMatches();
+ const rows=searchedMatches().sort((a,b)=>{const ta=a.start_time?new Date(a.start_time).getTime():Infinity;const tb=b.start_time?new Date(b.start_time).getTime():Infinity;return (Number.isFinite(ta)?ta:Infinity)-(Number.isFinite(tb)?tb:Infinity)||courtName(a.court_id).localeCompare(courtName(b.court_id),'ja',{numeric:true})||matchCode(a).localeCompare(matchCode(b),'ja',{numeric:true});});
  count.textContent=`${rows.length} / ${visibleMatches().length} 試合を表示`;
  results.innerHTML=rows.map(matchCard).join('')||'<div class="empty">該当試合がありません。</div>';
  results.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editScore(b.dataset.edit));
