@@ -417,6 +417,21 @@
 #createTournamentForm .new-tournament-basic .nt-native-shell:focus-within {
   outline:2px solid #3488be; outline-offset:1px;
 }
+
+/* Step487: compact tournament operations progress overview */
+.ops-progress-summary{margin:13px 0 22px;max-width:100%;min-width:0}
+.ops-progress-numbers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid #dbe5e9;border-bottom:1px solid #dbe5e9;padding:15px 0;gap:0}
+.ops-progress-numbers>div{text-align:center;min-width:0;padding:2px 4px}
+.ops-progress-numbers>div+div{border-left:1px solid #dbe5e9}
+.ops-progress-numbers span{display:block;color:#607682;font-size:12px;margin-bottom:5px}
+.ops-progress-numbers strong{font-size:27px;color:#1c3944;font-variant-numeric:tabular-nums}
+.ops-progress-numbers small{margin-left:3px;color:#607682}
+.ops-progress-label{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin:18px 0 8px;color:#3d5968}
+.ops-progress-label strong{font-size:16px;color:#116c62}
+.ops-shortcuts-heading{font-size:15px;margin:21px 0 12px}
+.ops-shortcuts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.ops-shortcuts .btn{min-width:0;white-space:normal;line-height:1.4}
+@media(max-width:650px){.ops-shortcuts{grid-template-columns:1fr}.ops-progress-numbers strong{font-size:24px}.ops-shortcuts .btn{width:100%}}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
@@ -1119,7 +1134,29 @@ function filteredCategories(){return state.categories.filter(c=>state.tournament
 function controls(){const cats=filteredCategories();return `<div class="filters"><div><label>大会</label><select class="field" id="tournamentFilter">${opt('all','すべて',state.tournament)}${state.tournaments.map(t=>opt(t.id,t.name,state.tournament)).join('')}</select></div><div><label>カテゴリー</label><select class="field" id="categoryFilter">${opt('all','すべて',state.category)}${cats.map(c=>opt(c.id,c.name,state.category)).join('')}</select></div></div>`}
 function wireControls(){const t=$('tournamentFilter'),c=$('categoryFilter');if(t)t.onchange=()=>{state.tournament=t.value;state.category='all';render()};if(c)c.onchange=()=>{state.category=c.value;render()}}
 function matchCard(m){const pending=!m.pair_a_id||!m.pair_b_id;const done=isDone(m);const walk=isWalkover(m);return `<article class="card match"><div class="row"><span class="stage">${matchCode(m)?`<b class="match-number">${esc(matchCode(m))}</b> ／ `:''}${esc(catName(m.category_id))} / ${esc(stageLabel(m))}${m.group_name?' / '+esc(m.group_name)+'組':''}</span><span class="status ${done||walk?'done':pending?'pending':''}">${walk?'不戦勝':done?'結果登録済':pending?'対戦相手未確定':m.status==='playing'?'試合中':'予定'}</span></div><div class="teams">${esc(pairName(m.pair_a_id))}<br><span class="muted">vs</span><br>${esc(pairName(m.pair_b_id))}</div>${walk?`<p class="prompt">不戦勝：${esc(winnerName(m))}</p>`:''}<div class="row"><small class="muted">${esc(timeOf(m))}　コート ${esc(courtName(m.court_id))}</small>${done?`<span class="score mono">${m.score_a} - ${m.score_b}</span>`:''}</div>${state.staff&&stageFor(m)?.stage_type==='preliminary'&&preliminaryEditLocked(m)?`<p class="prompt">${state.qualificationLocks.includes(m.category_id)?'決勝進出者確定済み：予選結果の変更不可':'決勝進出者の確定状態を確認中・取得失敗：予選結果の編集を停止中'}</p>`:''}${state.staff&&!scoreEditLocked(m)&&(!pending||walk)?`<div class="row" style="margin-top:10px"><span class="secondary-text">スタッフ操作</span><button class="btn secondary mini-btn" data-edit="${esc(m.id)}">${walk?'不戦勝を確認':done?'結果修正':'結果入力'}</button></div>`:''}</article>`}
-function home(){const ms=visibleMatches(),done=ms.filter(m=>isDone(m)||isWalkover(m)).length;return `${controls()}<h2>大会の状況</h2><div class="metrics"><div class="metric"><small>登録ペア</small><strong>${state.pairs.filter(p=>state.category==='all'||p.category_id===state.category).length}</strong></div><div class="metric"><small>登録試合</small><strong>${ms.length}</strong></div><div class="metric"><small>結果確定</small><strong>${done}</strong></div></div><div class="progress"><div style="width:${ms.length?100*done/ms.length:0}%"></div></div><div class="notice blue">この画面はSupabase共有データを表示します。結果入力はスタッフ認証後、サーバー側RPC経由で保存します。開発用のため実際の大会運営にはまだ使用しないでください。</div><h2>操作を始める</h2><div class="grid"><button class="btn" data-goto="courts">コート別を見る</button><button class="btn secondary" data-goto="matches">試合一覧を見る</button><button class="btn secondary" data-goto="bracket">決勝トーナメントを見る</button></div><h2>大会一覧</h2>${state.tournaments.map(t=>`<div class="card"><b>${esc(t.name)}</b><p class="secondary-text">カテゴリー：${state.categories.filter(c=>c.tournament_id===t.id).map(c=>esc(c.name)).join(' / ')||'未登録'}</p></div>`).join('')||'<div class="empty">大会データなし</div>'}`}
+function home(){
+ const ms=visibleMatches();
+ const done=ms.filter(m=>isDone(m)||isWalkover(m)).length;
+ const cats=filteredCategories();
+ const pairs=state.pairs.filter(p=>(state.category==='all'||p.category_id===state.category)&&(state.tournament==='all'||cats.some(c=>c.id===p.category_id)));
+ const percent=ms.length?Math.round(100*done/ms.length):0;
+ return `<h2>進行状況</h2>${controls()}
+ <div class="ops-progress-summary">
+   <div class="ops-progress-numbers">
+     <div><span>登録ペア</span><strong>${pairs.length}</strong><small>組</small></div>
+     <div><span>登録試合</span><strong>${ms.length}</strong><small>試合</small></div>
+     <div><span>結果登録済み</span><strong>${done}</strong><small>試合</small></div>
+   </div>
+   <div class="ops-progress-label"><span>試合の進行率</span><strong>${percent}%</strong></div>
+   <div class="progress" role="progressbar" aria-label="試合の進行率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><div style="width:${percent}%"></div></div>
+ </div>
+ <h3 class="ops-shortcuts-heading">試合を確認する</h3>
+ <div class="ops-shortcuts">
+   <button type="button" class="btn" data-goto="courts">コート別の試合</button>
+   <button type="button" class="btn secondary" data-goto="matches">試合一覧・結果入力</button>
+   <button type="button" class="btn secondary" data-goto="bracket">決勝トーナメント</button>
+ </div>`;
+}
 const drawOpenPanels={groups:false,bulk:false,reset:false,individualPrelim:false,individualFinal:false};
 const entryOpenPanels={import:false,manage:false};
 const pairManageOpenCategories=new Set();
