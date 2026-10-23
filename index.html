@@ -66,16 +66,16 @@
 @media screen{.basic-panel{margin:12px 0;border:1px solid #d7e0e8;border-radius:12px;background:var(--panel,#fff);overflow:hidden}.basic-panel>summary{cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:15px 18px;font-weight:700;list-style:none}.basic-panel>summary::-webkit-details-marker{display:none}.basic-panel>summary:after{content:'＋';margin-left:12px;font-size:20px}.basic-panel[open]>summary:after{content:'−'}.panel-chevron{font-weight:400;font-size:12px;opacity:.6;margin-left:auto}.basic-panel-content{padding:0 12px 12px}.basic-panel-content>h2:first-child{display:none}}
 @media(max-width:720px){.basic-panel>summary{padding:14px}.basic-panel-content{padding:0 8px 8px}}
 }
-/* Step 415: keep the collapsible pair-swap form in a clean single column. */
-@media screen{
- .group-swap-panel{display:block;min-width:0;}
- .group-swap-panel>summary{cursor:pointer;display:list-item;padding:10px 2px;font-weight:700;}
- .group-swap-body{display:flex;flex-direction:column;gap:14px;padding-top:12px;min-width:0;}
- .group-swap-body>.prompt{margin:0 0 4px;}
- .group-swap-field{display:block;min-width:0;}
- .group-swap-field>label{display:block;margin:0 0 8px;}
- .group-swap-field>.field{display:block;width:100%;margin:0;}
- .group-swap-body>.btn{display:block;width:100%;margin-top:2px;}
+/* Step 416: explicit vertical spacing for iOS Safari pair-swap form. */
+@media screen {
+  details.group-swap-panel { display:block; min-width:0; }
+  details.group-swap-panel > summary { cursor:pointer; padding:10px 2px 16px; font-weight:700; }
+  details.group-swap-panel .group-swap-body { display:block; min-width:0; padding:4px 0 2px; }
+  details.group-swap-panel .group-swap-body > .prompt { margin:0 0 24px; line-height:1.7; }
+  details.group-swap-panel .group-swap-field { display:block; width:100%; min-width:0; margin:0 0 24px; padding:0; }
+  details.group-swap-panel .group-swap-field > label { display:block; margin:0 0 10px; padding:0; line-height:1.4; }
+  details.group-swap-panel .group-swap-field > select.field { display:block; width:100%; min-width:0; height:auto; min-height:50px; margin:0; }
+  details.group-swap-panel .group-swap-body > button#groupSwapSubmit { display:block; width:100%; margin:8px 0 0; min-height:48px; }
 }
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
