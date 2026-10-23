@@ -297,6 +297,26 @@
 /* Step 450: Match tournament-settings + / - accordion controls (top-level entry panels only). */
 .prep-fold[data-entry-panel]>summary::after{content:"＋";font-size:20px;font-weight:600;color:#526965;line-height:1;flex-shrink:0}
 .prep-fold[data-entry-panel][open]>summary::after{content:"−"}
+/* Step 452: stable editable date/time value while retaining native OS picker controls. */
+@media screen {
+ #tournamentSettingsForm .ts-picker-wrap {
+  position:relative; display:flex; align-items:center; overflow:hidden;
+  width:100%; min-width:0; max-width:100%; height:52px;
+  border:1px solid #cedde3; border-radius:10px; background:#fff;
+ }
+ #tournamentSettingsForm .ts-picker-display {
+  display:block; width:100%; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  padding:10px 14px; font-size:16px; line-height:1.35;
+  color:#182f3c; pointer-events:none;
+ }
+ #tournamentSettingsForm .ts-picker-native {
+  position:absolute; inset:0; display:block; box-sizing:border-box;
+  width:100%; height:100%; min-width:0; max-width:100%;
+  padding:0; margin:0; border:0; opacity:0; cursor:pointer;
+  -webkit-appearance:auto; appearance:auto;
+ }
+ #tournamentSettingsForm .ts-picker-wrap:focus-within {outline:2px solid #2e8277;outline-offset:1px;}
+}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
@@ -2658,6 +2678,13 @@ function manage(){
  };
  return overview+(prepCreatingTournament?(sysAdmin?tournamentSection:'<div class="notice">大会の新規作成にはシステム管理者権限が必要です。</div>'):(pages[prepPage]||pages.basic)());
 }
+// Step 452: visible value for the native date/time picker overlay.
+function tsPickerValue(input){
+ const display=input?.parentElement?.querySelector('.ts-picker-display');
+ if(!display)return;
+ const value=String(input.value||'');
+ display.textContent=input.type==='date'?value.replace(/-/g,'/'):value;
+}
 // Tournament basic-settings editor (v10 simplified). Existing match data is never edited here.
 const tournamentSettingsSave={busy:false,message:'',ok:false};
 function tournamentSettingsSection(t){
@@ -2679,6 +2706,12 @@ function tournamentSettingsSection(t){
    const canEditField=editable&&can;
    const shownType=!canEditField&&(type==='date'||type==='time')?'text':type;
    const shownValue=!canEditField&&type==='date'?String(value).replace(/-/g,'/'):value;
+   // iOS Safari may draw editable native date/time fields beyond their CSS box.
+   // Keep the native picker as a transparent overlay; draw a stable, normal-size value below it.
+   if(canEditField&&(type==='date'||type==='time')){
+     const displayValue=type==='date'?String(value).replace(/-/g,'/'):String(value);
+     return `<div><label for="ts-${key}">${label}</label><div class="ts-picker-wrap"><span class="ts-picker-display" aria-hidden="true">${esc(displayValue)}</span><input class="ts-picker-native" id="ts-${key}" type="${type}" value="${esc(value)}" required aria-label="${label}" oninput="tsPickerValue(this)" onchange="tsPickerValue(this)"></div></div>`;
+   }
    return `<div><label for="ts-${key}">${label}</label><input class="field" id="ts-${key}" type="${shownType}" value="${esc(shownValue)}" ${type==='number'?'min="'+(key==='minimum_rest_minutes'?0:1)+'" max="'+(key==='max_consecutive_matches'?999:180)+'" step="1"':''} ${canEditField?'':'disabled'} required></div>`;
  }).join('');
  return `<h2>大会基本設定の編集</h2><form class="card stack" id="tournamentSettingsForm"><div><label for="ts-name">大会名</label><input class="field" id="ts-name" value="${esc(t.name)}" maxlength="200" required ${can?'':'disabled'}></div><div class="grid tournament-settings-fields">${inputs}</div><p class="prompt">開催時間の開始後90分と終了前60分は運営時間として確保します。</p>${!editable?`<div class="notice">この大会には${count}試合が登録されています。既存の時間割を保護するため、現在は大会名のみ変更できます。</div>`:''}${t.status==='completed'?'<div class="notice">終了済み大会は編集できません。</div>':''}<button class="btn wide" id="tournamentSettingsSubmit" type="submit" ${can?'':'disabled'}>${tournamentSettingsSave.busy?'保存中…':'基本設定を保存'}</button>${tournamentSettingsSave.message?`<p class="${tournamentSettingsSave.ok?'notice blue':'empty-error'}" role="status">${esc(tournamentSettingsSave.message)}</p>`:''}</form>`;
