@@ -90,12 +90,17 @@
   }
 }
 
-/* Step 426: prevent native date/time inputs from overflowing the basic settings grid on iPhone Safari. */
-.tournament-settings-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.tournament-settings-fields > div { min-width:0; max-width:100%; }
+/* Step 427: keep iOS Safari native date/time controls within the settings card. */
+.tournament-settings-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width:0; width:100%; }
+.tournament-settings-fields > div { min-width:0; max-width:100%; width:100%; }
 .tournament-settings-fields .field { display:block; box-sizing:border-box; width:100%; min-width:0; max-width:100%; }
+.tournament-settings-fields input[type="date"],
+.tournament-settings-fields input[type="time"] { -webkit-appearance:none; appearance:none; max-inline-size:100%; min-inline-size:0; }
 @media (max-width:759px) {
  .tournament-settings-fields { grid-template-columns:minmax(0,1fr); }
+ /* A small fixed gutter accommodates Safari's intrinsic native-control sizing. */
+ .tournament-settings-fields input[type="date"],
+ .tournament-settings-fields input[type="time"] { width:calc(100% - 12px); max-width:calc(100% - 12px); margin-right:12px; }
 }
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
