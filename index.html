@@ -963,43 +963,56 @@ function calculateCapacityAlternatives(){
    if(options.some(o=>!o.length)){
     capacityAlternatives.busy=false;updateProgress('有効な募集ペア数を設定できないカテゴリーがあります。');return;
    }
-   let frontier=[{counts:current,loss:0}],visited=new Set([current.join(',')]),attempts=0;
-   const limit=100;
+   // Phase 1: search broad, evenly reduced combinations before fine tuning.
+   // The old loss-first search exhausted 100 trials near the original counts.
+   const signatures=new Set();
+   const queue=[];
+   const add=(counts)=>{
+    const signature=counts.join(',');
+    if(signatures.has(signature)||counts.every((n,i)=>n===current[i]))return;
+    signatures.add(signature);queue.push(counts);
+   };
+   const nearest=(values,target)=>values.reduce((best,n)=>Math.abs(n-target)<Math.abs(best-target)?n:best,values[0]);
+   for(const ratio of [0.75,0.5,0.35,0.25,0.15,0]){
+    add(options.map((values,i)=>nearest(values,Math.max(3,Math.round(current[i]*ratio)))));
+   }
+   for(let i=0;i<categories.length;i++){
+    for(const ratio of [0.5,0.25,0]){
+     const counts=current.slice();counts[i]=nearest(options[i],Math.max(3,Math.round(current[i]*ratio)));add(counts);
+    }
+   }
+   // Phase 2: vary each category around the promising coarse configurations.
+   const coarse=queue.slice();
+   for(const base of coarse){
+    for(let i=0;i<categories.length;i++){
+     const idx=options[i].indexOf(base[i]);
+     for(const delta of [-2,-1,1,2]){
+      const j=idx+delta;
+      if(j<0||j>=options[i].length)continue;
+      const counts=base.slice();counts[i]=options[i][j];add(counts);
+     }
+    }
+   }
+   let attempts=0, cursor=0;
+   const limit=Math.min(180,queue.length);
    function step(){
     if(capacityAlternatives.key!==capacityAlternativesKey(t,categories,courts)){
      capacityAlternatives.busy=false;updateProgress('設定が変更されたため、探索を中止しました。');return;
     }
     try{
-     // Process one simulation per turn to keep mobile UI responsive.
-     let evaluated=false;
-     while(frontier.length&&!evaluated&&attempts<limit&&capacityAlternatives.results.length<3){
-      frontier.sort((a,b)=>a.loss-b.loss);
-      const item=frontier.shift();
-      if(item.loss>0){
-       evaluated=true;attempts++;
-       try{
-        const runs=capacityScenarioRuns(t,categories,courts,item.counts,hasWindows);
-        if(runs.length===4&&runs.every(r=>r.status==='fits_scenario'))capacityAlternatives.results.push(item.counts.slice());
-       }catch(err){console.warn('Capacity candidate failed:',err);}
-      }
-      if(capacityAlternatives.results.length>=3)break;
-      for(let i=0;i<categories.length;i++){
-       const next=options[i].filter(n=>n<item.counts[i]).slice(0,2);
-       for(const n of next){
-        const counts=item.counts.slice();counts[i]=n;
-        const signature=counts.join(',');if(visited.has(signature))continue;
-        visited.add(signature);
-        frontier.push({counts,loss:current.reduce((sum,v,j)=>sum+v-counts[j],0)});
+     if(cursor<limit&&capacityAlternatives.results.length<3){
+      const counts=queue[cursor++];attempts++;
+      try{
+       const runs=capacityScenarioRuns(t,categories,courts,counts,hasWindows);
+       if(runs.length===4&&runs.every(r=>r.status==='fits_scenario')){
+        capacityAlternatives.results.push(counts.slice());
        }
-      }
-      if(frontier.length>1000)frontier=frontier.sort((a,b)=>a.loss-b.loss).slice(0,1000);
-     }
-     if(frontier.length&&attempts<limit&&capacityAlternatives.results.length<3){
+      }catch(err){console.warn('Capacity candidate failed:',err);}
       updateProgress(`開催可能な組み合わせを確認中… ${attempts}/${limit}案（見つかった候補 ${capacityAlternatives.results.length}案）`);
       setTimeout(step,20);return;
      }
      capacityAlternatives.busy=false;
-     capacityAlternatives.message=capacityAlternatives.results.length?`${attempts}案を調べ、開催可能な候補を${capacityAlternatives.results.length}案見つけました。`:`${attempts}案を確認しましたが、条件に合う候補は見つかりませんでした。開催不可能と確定したわけではありません。`;
+     capacityAlternatives.message=capacityAlternatives.results.length?`${attempts}案を調べ、開催可能な候補を${capacityAlternatives.results.length}案見つけました。`:`${attempts}案を確認しましたが、開催可能な候補は見つかりませんでした。設定されたカテゴリー別の時間帯・面数などが厳しい可能性があります（開催不可能と確定したわけではありません）。`;
      render();
     }catch(err){capacityAlternatives.busy=false;updateProgress(`計算を完了できませんでした：${err.message||String(err)}`);console.error(err);}
    }
