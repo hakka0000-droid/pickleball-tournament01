@@ -1296,11 +1296,14 @@ function publicScreen(){
   return `<h2>試合予定・結果</h2>${selector}${filters}<div class="public-list-title"><span>${items.length}試合</span></div><div class="public-match-list">${rows||'<div class="empty">該当する試合はありません。</div>'}</div>`;
  }
  // The public rankings share the operations display, with edit actions disabled.
+ const selectedCat=cats.some(c=>c.id===publicSelectedCategoryId)?publicSelectedCategoryId:'all';
+ if(selectedCat!==publicSelectedCategoryId)publicSelectedCategoryId=selectedCat;
+ const categorySelector=`<div class="public-match-filters"><div><label for="publicCategoryFilter">カテゴリー</label><select class="field" id="publicCategoryFilter">${opt('all','すべてのカテゴリー',selectedCat)}${cats.map(c=>opt(c.id,c.name,selectedCat)).join('')}</select></div></div>`;
  const previousTournament=state.tournament,previousCategory=state.category,previousStaff=state.staff;
  let body='';
  try{
   state.tournament=selected.id;
-  state.category='all';
+  state.category=selectedCat;
   state.staff=false;
   body=publicRankingView==='final'?bracket():ranking();
  }finally{
@@ -1314,7 +1317,7 @@ function publicScreen(){
  if(headingIndex>=0)body=body.slice(headingIndex);
  body=body.replace(/^<h2>(?:決勝トーナメント|予選順位・承認管理)<\/h2>/,'');
  const switcher=`<div class="match-view-switch" role="group" aria-label="順位・決勝の表示形式"><button type="button" data-public-ranking-view="preliminary" class="${publicRankingView==='preliminary'?'selected':''}" aria-pressed="${publicRankingView==='preliminary'}">予選</button><button type="button" data-public-ranking-view="final" class="${publicRankingView==='final'?'selected':''}" aria-pressed="${publicRankingView==='final'}">決勝</button></div>`;
- return `<h2>順位・決勝</h2>${selector}${switcher}${body}`;
+ return `<h2>順位・決勝</h2>${selector}${categorySelector}${switcher}${body}`;
 }
 
 function opsPublishedIds(){return new Set(state.tournaments.filter(t=>['published','in_progress','completed'].includes(t.status)).map(t=>t.id));}
