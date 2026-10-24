@@ -1013,7 +1013,8 @@ function calculateCapacityAlternatives(){
      }
      capacityAlternatives.busy=false;
      capacityAlternatives.message=capacityAlternatives.results.length?`${attempts}案を調べ、開催可能な候補を${capacityAlternatives.results.length}案見つけました。`:`${attempts}案を確認しましたが、開催可能な候補は見つかりませんでした。設定されたカテゴリー別の時間帯・面数などが厳しい可能性があります（開催不可能と確定したわけではありません）。`;
-     render();
+     updateProgress(capacityAlternatives.message);
+     try{render();}catch(renderError){updateProgress(`結果の表示を更新できませんでした：${renderError.message||String(renderError)}`);console.error(renderError);}
     }catch(err){capacityAlternatives.busy=false;updateProgress(`計算を完了できませんでした：${err.message||String(err)}`);console.error(err);}
    }
    updateProgress('開催可能な組み合わせを確認中…');
@@ -1038,10 +1039,11 @@ function capacityFeasibilitySummary(t,categories){
  const ok=!!runs&&runs.length===4&&runs.every(r=>r.status==='fits_scenario');
  const key=capacityAlternativesKey(t,categories,courts),valid=capacityAlternatives.key===key;
  const alternatives=valid?capacityAlternatives.results:[];
+ const resultMessage=capacityAlternatives.message?(valid?capacityAlternatives.message:'設定が変わったため、以前の探索結果は表示できません。もう一度計算してください。'): 'ボタンを押すと募集ペア数の候補を計算します。';
  const cells=categories.map((c,i)=>`<tr><td>${esc(c.name)}</td><td>${Number(plans[i].p.pairs)}</td>${alternatives.map(a=>`<td><b>${a[i]}</b></td>`).join('')}</tr>`).join('');
  const table=alternatives.length?`<div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>現在</th>${alternatives.map((_,i)=>`<th>案${i+1}</th>`).join('')}</tr></thead><tbody>${cells}</tbody></table></div><p class="prompt">各案は全カテゴリーをセットで変更する候補です。自動保存・変更は行いません。</p>`:'';
  const status=ok?'開催可能の見込み：仮配置4ケースで収まりました。':runs?'要調整：仮配置で収まらない試合があります。':'試算条件を確認してください。';
- return `<section class="card stack" aria-label="開催可否の目安"><h3>開催可否の目安</h3><div class="notice ${ok?'blue':''}"><b>${esc(status)}</b></div><p class="prompt">必要 ${required}試合 ／ 理論枠 ${maxSlots}試合 ／ 公式戦 ${courts}面 ／ 試合可能時間 ${playable}分</p>${!ok&&runs?`<h4>募集ペア数の調整候補（最大3案）</h4><button type="button" class="btn" id="calculateCapacityAlternatives" ${valid&&capacityAlternatives.busy?'disabled':''}>${valid&&capacityAlternatives.busy?'計算中…':'開催可能なペア数を探す'}</button>${table}<p class="prompt" id="capacityAlternativesProgress" role="status">${valid&&capacityAlternatives.message?esc(capacityAlternatives.message):'ボタンを押すと募集ペア数の候補を計算します。'}</p>`:''}${problem?`<p class="prompt">試算できない理由：${esc(problem)}</p>`:''}<p class="prompt">試合前90分・試合後60分を確保。カテゴリー別時間設定（未保存の入力を含む）を維持して試算します。候補は仮の勝敗4ケースで配置できたものに限りますが、実際の開催を保証するものではありません。実際の試合・時間割・募集ペア数は変更しません。</p></section>`;
+ return `<section class="card stack" aria-label="開催可否の目安"><h3>開催可否の目安</h3><div class="notice ${ok?'blue':''}"><b>${esc(status)}</b></div><p class="prompt">必要 ${required}試合 ／ 理論枠 ${maxSlots}試合 ／ 公式戦 ${courts}面 ／ 試合可能時間 ${playable}分</p>${!ok&&runs?`<h4>募集ペア数の調整候補（最大3案）</h4><button type="button" class="btn" id="calculateCapacityAlternatives" ${valid&&capacityAlternatives.busy?'disabled':''}>${valid&&capacityAlternatives.busy?'計算中…':'開催可能なペア数を探す'}</button>${table}<p class="prompt" id="capacityAlternativesProgress" role="status">${esc(resultMessage)}</p>`:''}${problem?`<p class="prompt">試算できない理由：${esc(problem)}</p>`:''}<p class="prompt">試合前90分・試合後60分を確保。カテゴリー別時間設定（未保存の入力を含む）を維持して試算します。候補は仮の勝敗4ケースで配置できたものに限りますが、実際の開催を保証するものではありません。実際の試合・時間割・募集ペア数は変更しません。</p></section>`;
 }
 const capacityOpenCards = new Set();
 function capacityPlanningSection(t,categories,availableSlots){
