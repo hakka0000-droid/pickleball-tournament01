@@ -1119,6 +1119,14 @@ function officialPanel(categoryId,slots,stageId){
    thirdCandidate=ranking[2].id;
   }
  }
+ // In knockout format, the third-place match winner is the provisional third-place pair.
+ if(!isRoundRobin){
+  const thirdMatch=stageMatches.find(m=>isThirdPlaceMatch(m));
+  if(thirdMatch&&thirdMatch.pair_a_id&&thirdMatch.pair_b_id){
+   const winner=isWalkover(thirdMatch)?thirdMatch.walkover_winner_pair_id:isDone(thirdMatch)&&thirdMatch.score_a!==thirdMatch.score_b?(thirdMatch.score_a>thirdMatch.score_b?thirdMatch.pair_a_id:thirdMatch.pair_b_id):null;
+   if(winner===thirdMatch.pair_a_id||winner===thirdMatch.pair_b_id)thirdCandidate=winner;
+  }
+ }
  const ready=isRoundRobin?allCompleted:!!calculated&&slots.length>0&&stageMatches.length===slots.length&&allCompleted;
  const status=locked?'正式確定済み':result?.status==='revoked'?'確定取消済み':'未確定';
  const first=locked?result.champion_pair_id:calculated?.champion;
