@@ -3979,7 +3979,7 @@ async function refreshAuth(){
 async function signOut(){if(!client)return;let {error}=await client.auth.signOut();if(error){alert(error.message);return}matchNumberLoadVersion++;state.matchNumbers={};state.matchNumberError='';state.auth=null;state.staff=false;state.systemAdmin=false;state.systemAdminLoaded=false;state.systemAdminError='';state.tournamentAdminIds=[];state.tournamentStaffIds=[];state.tournamentAdminLoaded=false;state.tournamentAdminError='';state.tab='public_home';render();await loadData()}
 async function confirmOfficial(categoryId){
  if(!state.staff||officialLocked(categoryId))return;
- if(!confirm('このカテゴリーの優勝・準優勝を正式確定しますか？\n確定後はスコア・対戦枠を編集できなくなります。'))return;
+ if(!confirm('このカテゴリーの優勝・準優勝・3位を正式確定しますか？\n確定後はスコア・対戦枠を編集できなくなります。'))return;
  try{const {error}=await client.rpc('staff_confirm_category_final_result',{p_category_id:categoryId});if(error)throw error;await loadData();alert('正式結果を確定しました。');}catch(e){alert('正式確定できませんでした：'+e.message+'\n最新データに更新してください。');await loadData()}
 }
 async function revokeOfficial(categoryId){
