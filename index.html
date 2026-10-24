@@ -934,6 +934,7 @@ function capacityScenarioRuns(t,categories,courts,counts,hasWindows){
  }finally{categories.forEach((c,i)=>{getCapacityPlan(t.id,c.id).pairs=originals[i];});}
 }
 function calculateCapacityAlternatives(){
+ if(capacityAlternatives.busy)return;
  const t=state.tournaments.find(x=>x.id===categoryForm.tournamentId);
  if(!t)return;
  const categories=state.categories.filter(c=>c.tournament_id===t.id);
@@ -941,35 +942,73 @@ function calculateCapacityAlternatives(){
  const key=capacityAlternativesKey(t,categories,courts);
  const current=categories.map(c=>Number(getCapacityPlan(t.id,c.id).pairs));
  const hasWindows=categories.some(c=>{const w=getWindowDraft(t.id,c);return !!(w.start||w.end||w.max||w.preferred)});
- const options=categories.map((c,i)=>{const p=getCapacityPlan(t.id,c.id);return Array.from({length:current[i]-2},(_,j)=>current[i]-j).filter(n=>planGroupings(n,p.advance,p.groupSize,p.finalFormat||'knockout'));});
- capacityAlternatives.key=key;capacityAlternatives.results=[];capacityAlternatives.busy=true;capacityAlternatives.message='候補を計算しています…';render();
- if(options.some(o=>!o.length)){capacityAlternatives.busy=false;capacityAlternatives.message='募集ペア数を減らせる有効な候補がありません。';render();return;}
- // 各カテゴリーの候補を減少幅の小さい順に探索する。組み合わせ爆発を避けるため最大160案。
- let frontier=[{counts:current,loss:0}],visited=new Set([current.join(',')]),attempts=0;
- function step(){
-  if(capacityAlternatives.key!==capacityAlternativesKey(t,categories,courts)){capacityAlternatives.busy=false;return;}
-  let batch=0;
-  while(frontier.length&&attempts<160&&capacityAlternatives.results.length<3&&batch<3){
-   frontier.sort((a,b)=>a.loss-b.loss);
-   const item=frontier.shift();
-   if(item.loss>0){
-    attempts++;batch++;
-    try{const runs=capacityScenarioRuns(t,categories,courts,item.counts,hasWindows);if(runs.length===4&&runs.every(r=>r.status==='fits_scenario'))capacityAlternatives.results.push(item.counts.slice());}catch(_e){}
+ capacityAlternatives.key=key;capacityAlternatives.results=[];capacityAlternatives.busy=true;
+ capacityAlternatives.message='候補を準備しています…';
+ const updateProgress=message=>{
+  capacityAlternatives.message=message;
+  const el=document.getElementById('capacityAlternativesProgress');
+  if(el)el.textContent=message;
+  const btn=document.getElementById('calculateCapacityAlternatives');
+  if(btn){btn.disabled=capacityAlternatives.busy;btn.textContent=capacityAlternatives.busy?'計算中…':'もう一度探す';}
+ };
+ updateProgress(capacityAlternatives.message);
+ // Let the browser paint the progress before beginning expensive simulation.
+ setTimeout(()=>{
+  try{
+   const options=categories.map((c,i)=>{
+    const p=getCapacityPlan(t.id,c.id),values=[];
+    for(let n=current[i];n>=3;n--){if(planGroupings(n,p.advance,p.groupSize,p.finalFormat||'knockout'))values.push(n);}
+    return values;
+   });
+   if(options.some(o=>!o.length)){
+    capacityAlternatives.busy=false;updateProgress('有効な募集ペア数を設定できないカテゴリーがあります。');return;
    }
-   if(capacityAlternatives.results.length>=3)break;
-   for(let i=0;i<categories.length;i++){
-    const next=options[i].filter(n=>n<item.counts[i]).slice(0,2);
-    for(const n of next){const counts=item.counts.slice();counts[i]=n;const signature=counts.join(',');if(visited.has(signature))continue;visited.add(signature);frontier.push({counts,loss:current.reduce((sum,v,j)=>sum+v-counts[j],0)});}
+   let frontier=[{counts:current,loss:0}],visited=new Set([current.join(',')]),attempts=0;
+   const limit=100;
+   function step(){
+    if(capacityAlternatives.key!==capacityAlternativesKey(t,categories,courts)){
+     capacityAlternatives.busy=false;updateProgress('設定が変更されたため、探索を中止しました。');return;
+    }
+    try{
+     // Process one simulation per turn to keep mobile UI responsive.
+     let evaluated=false;
+     while(frontier.length&&!evaluated&&attempts<limit&&capacityAlternatives.results.length<3){
+      frontier.sort((a,b)=>a.loss-b.loss);
+      const item=frontier.shift();
+      if(item.loss>0){
+       evaluated=true;attempts++;
+       try{
+        const runs=capacityScenarioRuns(t,categories,courts,item.counts,hasWindows);
+        if(runs.length===4&&runs.every(r=>r.status==='fits_scenario'))capacityAlternatives.results.push(item.counts.slice());
+       }catch(err){console.warn('Capacity candidate failed:',err);}
+      }
+      if(capacityAlternatives.results.length>=3)break;
+      for(let i=0;i<categories.length;i++){
+       const next=options[i].filter(n=>n<item.counts[i]).slice(0,2);
+       for(const n of next){
+        const counts=item.counts.slice();counts[i]=n;
+        const signature=counts.join(',');if(visited.has(signature))continue;
+        visited.add(signature);
+        frontier.push({counts,loss:current.reduce((sum,v,j)=>sum+v-counts[j],0)});
+       }
+      }
+      if(frontier.length>1000)frontier=frontier.sort((a,b)=>a.loss-b.loss).slice(0,1000);
+     }
+     if(frontier.length&&attempts<limit&&capacityAlternatives.results.length<3){
+      updateProgress(`開催可能な組み合わせを確認中… ${attempts}/${limit}案（見つかった候補 ${capacityAlternatives.results.length}案）`);
+      setTimeout(step,20);return;
+     }
+     capacityAlternatives.busy=false;
+     capacityAlternatives.message=capacityAlternatives.results.length?`${attempts}案を調べ、開催可能な候補を${capacityAlternatives.results.length}案見つけました。`:`${attempts}案を確認しましたが、条件に合う候補は見つかりませんでした。開催不可能と確定したわけではありません。`;
+     render();
+    }catch(err){capacityAlternatives.busy=false;updateProgress(`計算を完了できませんでした：${err.message||String(err)}`);console.error(err);}
    }
-   if(frontier.length>2500)frontier=frontier.sort((a,b)=>a.loss-b.loss).slice(0,2500);
-  }
-  if(frontier.length&&attempts<160&&capacityAlternatives.results.length<3){setTimeout(step,0);return;}
-  capacityAlternatives.busy=false;
-  capacityAlternatives.message=capacityAlternatives.results.length?'仮配置4ケースで全試合を配置できた候補です。':'探索範囲内では配置できる候補が見つかりませんでした。開催不可能と確定したわけではありません。';
-  render();
- }
- setTimeout(step,0);
+   updateProgress('開催可能な組み合わせを確認中…');
+   setTimeout(step,20);
+  }catch(err){capacityAlternatives.busy=false;updateProgress(`計算を開始できませんでした：${err.message||String(err)}`);console.error(err);}
+ },40);
 }
+
 function capacityFeasibilitySummary(t,categories){
  if(!t||!categories.length)return '';
  const courts=state.courts.filter(c=>c.tournament_id===t.id&&c.is_active&&c.court_type==='official').length;
@@ -989,7 +1028,7 @@ function capacityFeasibilitySummary(t,categories){
  const cells=categories.map((c,i)=>`<tr><td>${esc(c.name)}</td><td>${Number(plans[i].p.pairs)}</td>${alternatives.map(a=>`<td><b>${a[i]}</b></td>`).join('')}</tr>`).join('');
  const table=alternatives.length?`<div class="tablebox"><table class="tbl"><thead><tr><th>カテゴリー</th><th>現在</th>${alternatives.map((_,i)=>`<th>案${i+1}</th>`).join('')}</tr></thead><tbody>${cells}</tbody></table></div><p class="prompt">各案は全カテゴリーをセットで変更する候補です。自動保存・変更は行いません。</p>`:'';
  const status=ok?'開催可能の見込み：仮配置4ケースで収まりました。':runs?'要調整：仮配置で収まらない試合があります。':'試算条件を確認してください。';
- return `<section class="card stack" aria-label="開催可否の目安"><h3>開催可否の目安</h3><div class="notice ${ok?'blue':''}"><b>${esc(status)}</b></div><p class="prompt">必要 ${required}試合 ／ 理論枠 ${maxSlots}試合 ／ 公式戦 ${courts}面 ／ 試合可能時間 ${playable}分</p>${!ok&&runs?`<h4>募集ペア数の調整候補（最大3案）</h4><button type="button" class="btn" id="calculateCapacityAlternatives" ${valid&&capacityAlternatives.busy?'disabled':''}>${valid&&capacityAlternatives.busy?'計算中…':'開催可能なペア数を探す'}</button>${table}${valid&&capacityAlternatives.message?`<p class="prompt">${esc(capacityAlternatives.message)}</p>`:''}`:''}${problem?`<p class="prompt">試算できない理由：${esc(problem)}</p>`:''}<p class="prompt">試合前90分・試合後60分を確保。カテゴリー別時間設定（未保存の入力を含む）を維持して試算します。候補は仮の勝敗4ケースで配置できたものに限りますが、実際の開催を保証するものではありません。実際の試合・時間割・募集ペア数は変更しません。</p></section>`;
+ return `<section class="card stack" aria-label="開催可否の目安"><h3>開催可否の目安</h3><div class="notice ${ok?'blue':''}"><b>${esc(status)}</b></div><p class="prompt">必要 ${required}試合 ／ 理論枠 ${maxSlots}試合 ／ 公式戦 ${courts}面 ／ 試合可能時間 ${playable}分</p>${!ok&&runs?`<h4>募集ペア数の調整候補（最大3案）</h4><button type="button" class="btn" id="calculateCapacityAlternatives" ${valid&&capacityAlternatives.busy?'disabled':''}>${valid&&capacityAlternatives.busy?'計算中…':'開催可能なペア数を探す'}</button>${table}<p class="prompt" id="capacityAlternativesProgress" role="status">${valid&&capacityAlternatives.message?esc(capacityAlternatives.message):'ボタンを押すと募集ペア数の候補を計算します。'}</p>`:''}${problem?`<p class="prompt">試算できない理由：${esc(problem)}</p>`:''}<p class="prompt">試合前90分・試合後60分を確保。カテゴリー別時間設定（未保存の入力を含む）を維持して試算します。候補は仮の勝敗4ケースで配置できたものに限りますが、実際の開催を保証するものではありません。実際の試合・時間割・募集ペア数は変更しません。</p></section>`;
 }
 const capacityOpenCards = new Set();
 function capacityPlanningSection(t,categories,availableSlots){
