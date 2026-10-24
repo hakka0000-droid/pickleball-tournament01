@@ -3215,7 +3215,16 @@ function finalRoundRobinTable(games,categoryId){
  const allDone=games.every(m=>isDone(m)||isWalkover(m));
  if(allDone)stats.sort((a,b)=>b.wins-a.wins||b.diff-a.diff||pairName(a.id).localeCompare(pairName(b.id),'ja'));
  const rows=stats.map((r,i)=>`<tr><td><b>${allDone?`${i+1}位`:'—'}</b></td><td>${esc(pairName(r.id))}</td><td>${r.wins}勝${r.losses}敗</td><td>${r.diff>0?'+':''}${r.diff}</td></tr>`).join('');
- const matchRows=games.map(m=>{
+ // Sort by displayed match number (M-010, M-011, M-012), not by participant order.
+ const orderedGames=[...games].sort((a,b)=>{
+  const ca=String(matchCode(a)||'');
+  const cb=String(matchCode(b)||'');
+  const na=Number((ca.match(/\d+/)||[])[0]);
+  const nb=Number((cb.match(/\d+/)||[])[0]);
+  if(Number.isFinite(na)&&Number.isFinite(nb)&&na!==nb)return na-nb;
+  return ca.localeCompare(cb,'ja',{numeric:true})||String(a.id).localeCompare(String(b.id));
+ });
+ const matchRows=orderedGames.map(m=>{
   const done=isDone(m)||isWalkover(m);
   const result=isWalkover(m)?'不戦勝':isDone(m)?`${esc(m.score_a)} - ${esc(m.score_b)}`:'未入力';
   const action=state.staff&&!scoreEditLocked(m)&&m.pair_a_id&&m.pair_b_id?`<button type="button" class="btn secondary mini-btn" data-edit="${esc(m.id)}">${done?'結果修正':'結果入力'}</button>`:'';
