@@ -1249,7 +1249,7 @@ function publicScreen(){
   const matchHours=displayRange(begin===null?null:begin+30,finish===null?null:finish-30);
   const receptionHours=displayRange(begin===null?null:begin+30,begin===null?null:begin+60);
   const categoriesHtml=cats.length?`<div class="public-overview-badges">${cats.map(c=>`<span class="public-overview-badge">${esc(c.name)}</span>`).join('')}</div>`:'未登録';
-  return `<h2>大会概要</h2><div class="card public-overview">${ts.length>1?`<label for="publicTournamentFilter">大会を選択</label><select class="field" id="publicTournamentFilter">${ts.map(t=>opt(t.id,`${t.name}（${t.event_date||'日付未設定'}）`,publicSelectedTournamentId)).join('')}</select>`:`<h3 class="public-overview-name">${esc(selected.name)}</h3>`}<dl class="public-overview-details"><dt>開催日</dt><dd>${esc(dateText)}</dd><dt>開催時間</dt><dd>${esc(matchHours)}</dd><dt>受付時間</dt><dd>${esc(receptionHours)}</dd><dt>カテゴリー</dt><dd>${categoriesHtml}</dd></dl></div>`;
+  return `<h2>大会概要</h2><div class="card public-overview">${ts.length>1?`<label for="publicTournamentFilter">大会を選択</label><select class="field" id="publicTournamentFilter">${ts.map(t=>opt(t.id,`${t.name}（${t.event_date||'日付未設定'}）`,publicSelectedTournamentId)).join('')}</select>`:`<h3 class="public-overview-name">${esc(selected.name)}</h3>`}<dl class="public-overview-details"><dt>開催日</dt><dd>${esc(dateText)}</dd>${String(selected.venue_name||'').trim()?`<dt>開催場所</dt><dd>${esc(selected.venue_name)}</dd>`:''}<dt>開催時間</dt><dd>${esc(matchHours)}</dd><dt>受付時間</dt><dd>${esc(receptionHours)}</dd><dt>カテゴリー</dt><dd>${categoriesHtml}</dd></dl></div>`;
  }
  if(state.tab==='public_matches')return `<h2>試合予定・結果</h2>${heading}<p class="prompt">${esc(selected.name)} ／ 全${ms.length}試合</p>${ms.slice().sort((a,b)=>(a.start_time||'').localeCompare(b.start_time||'')).map(m=>`<div class="card match"><div class="stage">${esc(catName(m.category_id))} ／ ${esc(isThirdPlaceMatch(m)?'3位決定戦':stageLabel(m))}${matchCode(m)?' ／ '+esc(matchCode(m)):''}</div><div class="teams">${esc(pairName(m.pair_a_id))} vs ${esc(pairName(m.pair_b_id))}</div><p class="prompt">${esc(timeOf(m))} ／ ${esc(courtName(m.court_id))}</p><b>${isWalkover(m)?'不戦勝：'+esc(winnerName(m)):isDone(m)?esc(m.score_a)+' - '+esc(m.score_b):'結果未確定'}</b></div>`).join('')||'<div class="empty">公開中の試合はありません。</div>'}`;
  return `<h2>順位・決勝</h2>${heading}<div class="notice">正式結果が登録されたカテゴリーのみ表示します。予選順位の公開一覧は未実装です。</div>${state.officialResults.filter(r=>catids.has(r.category_id)&&r.status==='confirmed').map(r=>`<div class="card"><h3>${esc(catName(r.category_id))}</h3><p>優勝：<b>${esc(pairName(r.champion_pair_id))}</b></p><p>準優勝：<b>${esc(pairName(r.runner_up_pair_id))}</b></p><p>3位：<b>${esc(r.third_place_pair_id?pairName(r.third_place_pair_id):'該当なし')}</b></p></div>`).join('')||'<div class="empty">公開できる正式結果はまだありません。</div>'}`;
@@ -3030,7 +3030,7 @@ function tournamentSettingsSection(t){
    }
    return `<div><label for="ts-${key}">${label}</label><input class="field" id="ts-${key}" type="${shownType}" value="${esc(shownValue)}" ${type==='number'?'min="'+(key==='minimum_rest_minutes'?0:1)+'" max="'+(key==='max_consecutive_matches'?999:180)+'" step="1"':''} ${canEditField?'':'disabled'} required></div>`;
  }).join('');
- return `<h2>大会基本設定の編集</h2><form class="card stack" id="tournamentSettingsForm"><div><label for="ts-name">大会名</label><input class="field" id="ts-name" value="${esc(t.name)}" maxlength="200" required ${can?'':'disabled'}></div><div class="grid tournament-settings-fields">${inputs}</div><p class="prompt">開催時間の開始後90分と終了前60分は運営時間として確保します。</p>${!editable?`<div class="notice">この大会には${count}試合が登録されています。既存の時間割を保護するため、現在は大会名のみ変更できます。</div>`:''}${t.status==='completed'?'<div class="notice">終了済み大会は編集できません。</div>':''}<button class="btn wide" id="tournamentSettingsSubmit" type="submit" ${can?'':'disabled'}>${tournamentSettingsSave.busy?'保存中…':'基本設定を保存'}</button>${tournamentSettingsSave.message?`<p class="${tournamentSettingsSave.ok?'notice blue':'empty-error'}" role="status">${esc(tournamentSettingsSave.message)}</p>`:''}</form>`;
+ return `<h2>大会基本設定の編集</h2><form class="card stack" id="tournamentSettingsForm"><div><label for="ts-name">大会名</label><input class="field" id="ts-name" value="${esc(t.name)}" maxlength="200" required ${can?'':'disabled'}></div><div><label for="ts-venue">開催場所（任意）</label><input class="field" id="ts-venue" value="${esc(t.venue_name||'')}" maxlength="200" ${can?'':'disabled'} placeholder="例：市民体育館"></div><div class="grid tournament-settings-fields">${inputs}</div><p class="prompt">開催時間の開始後90分と終了前60分は運営時間として確保します。</p>${!editable?`<div class="notice">この大会には${count}試合が登録されています。既存の時間割を保護するため、現在は大会名と開催場所のみ変更できます。</div>`:''}${t.status==='completed'?'<div class="notice">終了済み大会は編集できません。</div>':''}<button class="btn wide" id="tournamentSettingsSubmit" type="submit" ${can?'':'disabled'}>${tournamentSettingsSave.busy?'保存中…':'基本設定を保存'}</button>${tournamentSettingsSave.message?`<p class="${tournamentSettingsSave.ok?'notice blue':'empty-error'}" role="status">${esc(tournamentSettingsSave.message)}</p>`:''}</form>`;
 }
 async function saveTournamentSettings(e){
  e.preventDefault();
@@ -3039,6 +3039,8 @@ async function saveTournamentSettings(e){
  const t=state.tournaments.find(x=>x.id===tid);
  if(!t||t.status==='completed'||!state.staff||!state.tournamentAdminIds.includes(tid))return;
  const name=$('ts-name')?.value.trim();
+ const venueName=String($('ts-venue')?.value||'').trim();
+ if(venueName.length>200){alert('開催場所は200文字以内で入力してください。');return;}
  const count=tournamentMatches(tid).length;
  const editable=count===0;
  const read=key=>$('ts-'+key)?.value;
@@ -3051,14 +3053,14 @@ async function saveTournamentSettings(e){
  }
  const expected={name:t.name,event_date:t.event_date,start_time:t.start_time,end_time:t.end_time,match_minutes:t.match_minutes,minimum_rest_minutes:t.minimum_rest_minutes,max_consecutive_matches:t.max_consecutive_matches};
  const snapshot=JSON.stringify(expected);
- if(!confirm(`大会「${t.name}」の${editable?'基本設定':'大会名'}を保存しますか？`))return;
+ if(!confirm(`大会「${t.name}」の${editable?'基本設定':'大会名・開催場所'}を保存しますか？`))return;
  tournamentSettingsSave.busy=true;tournamentSettingsSave.message='';render();
  let attempted=false;
  try{
-  const {data:latest,error:readError}=await client.from('tournaments').select('id,name,status,event_date,start_time,end_time,match_minutes,minimum_rest_minutes,max_consecutive_matches').eq('id',tid).single();
+  const {data:latest,error:readError}=await client.from('tournaments').select('id,name,status,venue_name,event_date,start_time,end_time,match_minutes,minimum_rest_minutes,max_consecutive_matches').eq('id',tid).single();
   if(readError||!latest)throw Error('保存前の大会情報を取得できませんでした。');
   const current={name:latest.name,event_date:latest.event_date,start_time:latest.start_time,end_time:latest.end_time,match_minutes:latest.match_minutes,minimum_rest_minutes:latest.minimum_rest_minutes,max_consecutive_matches:latest.max_consecutive_matches};
-  if(JSON.stringify(current)!==snapshot||latest.status!==t.status)throw Error('別の操作で大会設定が変更されました。更新してください。');
+  if(JSON.stringify(current)!==snapshot||latest.status!==t.status||String(latest.venue_name||'')!==String(t.venue_name||''))throw Error('別の操作で大会設定が変更されました。更新してください。');
   // Check match count again before sending; the RPC independently protects the same condition.
   const catIds=state.categories.filter(c=>c.tournament_id===tid).map(c=>c.id);
   if(editable&&catIds.length){const {count:dbCount,error:countError}=await client.from('matches').select('id',{count:'exact',head:true}).in('category_id',catIds);if(countError||dbCount!==0)throw Error('試合が新しく作成された可能性があります。更新してください。');}
@@ -3067,10 +3069,14 @@ async function saveTournamentSettings(e){
   const args=editable?{p_tournament_id:tid,p_expected_settings:expected,p_new_name:values.name,p_new_event_date:values.event_date,p_new_start_time:values.start_time,p_new_end_time:values.end_time,p_new_match_minutes:values.match_minutes,p_new_minimum_rest_minutes:values.minimum_rest_minutes,p_new_max_consecutive_matches:values.max_consecutive_matches}:{p_tournament_id:tid,p_expected_name:t.name,p_new_name:values.name};
   const {error}=await client.rpc('admin_update_tournament_settings',args);
   if(error)throw Error(error.message);
-  const {data:after,error:verifyError}=await client.from('tournaments').select('id,name,event_date,start_time,end_time,match_minutes,minimum_rest_minutes,max_consecutive_matches').eq('id',tid).single();
+  if(venueName!==String(t.venue_name||'')){
+   const {error:venueError}=await client.rpc('admin_update_tournament_venue',{p_tournament_id:tid,p_expected_venue_name:t.venue_name??null,p_new_venue_name:venueName||null});
+   if(venueError)throw Error('大会名・基本設定は保存された可能性がありますが、開催場所の保存に失敗しました：'+venueError.message);
+  }
+  const {data:after,error:verifyError}=await client.from('tournaments').select('id,name,venue_name,event_date,start_time,end_time,match_minutes,minimum_rest_minutes,max_consecutive_matches').eq('id',tid).single();
   if(verifyError||!after)throw Error('保存後の再取得に失敗しました。');
   const same=(a,b)=>String(a??'').slice(0,5)===String(b??'').slice(0,5);
-  if(after.name!==name||(editable&&(String(after.event_date)!==values.event_date||!same(after.start_time,values.start_time)||!same(after.end_time,values.end_time)||Number(after.match_minutes)!==values.match_minutes||Number(after.minimum_rest_minutes)!==values.minimum_rest_minutes||Number(after.max_consecutive_matches)!==values.max_consecutive_matches)))throw Error('保存結果が入力内容と一致しません。');
+  if(after.name!==name||String(after.venue_name||'')!==venueName||(editable&&(String(after.event_date)!==values.event_date||!same(after.start_time,values.start_time)||!same(after.end_time,values.end_time)||Number(after.match_minutes)!==values.match_minutes||Number(after.minimum_rest_minutes)!==values.minimum_rest_minutes||Number(after.max_consecutive_matches)!==values.max_consecutive_matches)))throw Error('保存結果が入力内容と一致しません。');
   tournamentSettingsSave.ok=true;tournamentSettingsSave.message='保存してSupabaseの値を照合しました。';
   await loadData();if(state.error)throw Error('保存された可能性がありますが、再読み込みに失敗しました。');
  }catch(err){tournamentSettingsSave.ok=false;tournamentSettingsSave.message='保存結果を確認できませんでした：'+err.message+(attempted?' 再送信せず「更新」で確認してください。':'');}
