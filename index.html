@@ -3917,7 +3917,7 @@ function tournamentCloseSection(){
  const ms=state.matches.filter(m=>state.categories.some(c=>c.id===m.category_id&&c.tournament_id===selected.id));
  const unfinished=ms.filter(m=>!['completed','walkover'].includes(m.status));
  const can=!!client&&state.staff&&!state.loading&&!tournamentCloseState.busy&&!completed&&state.tournamentAdminLoaded&&!state.tournamentAdminError;
- return `<h2>大会終了</h2><div class="card stack"><label for="closeTournamentSelect">対象大会</label><select id="closeTournamentSelect" class="field">${eligible.map(t=>opt(t.id,t.name,selected.id)).join('')}</select><p><b>現在の状態：</b>${completed?'終了済み':selected.status==='in_progress'?'進行中':'公開済み'}</p><p><b>登録試合：</b>${ms.length}試合　<b>未終了の試合：</b>${unfinished.length}試合</p>${completed?'<div class="notice blue">この大会は終了済みです。試合結果は閲覧できますが、変更できません。</div>':`<div class="notice">大会終了後は試合結果や大会情報の変更が制限されます。すべての結果・順位・決勝結果を確認してから終了してください。${unfinished.length?' 未終了の試合があります。終了前に確認してください。':''}</div><button type="button" class="btn wide" id="completeTournamentButton" ${can&&!unfinished.length?'':'disabled'}>${tournamentCloseState.busy?'終了処理中…':'大会を終了する'}</button>${unfinished.length?'<p class="prompt">未終了の試合があるため、終了ボタンを無効にしています。</p>':''}`}${tournamentCloseState.message?`<div role="status" class="${tournamentCloseState.ok?'notice blue':'empty-error'}">${esc(tournamentCloseState.message)}</div>`:''}</div>`;
+ return `<h2>大会終了</h2><div class="card stack"><label for="closeTournamentSelect">対象大会</label><select id="closeTournamentSelect" class="field">${eligible.map(t=>opt(t.id,t.name,selected.id)).join('')}</select><p><b>現在の状態：</b>${completed?'終了済み':selected.status==='in_progress'?'進行中':'公開済み'}</p><p><b>登録試合：</b>${ms.length}試合　<b>未終了の試合：</b>${unfinished.length}試合</p>${completed?'<div class="notice blue">この大会は終了済みです。結果は大会閲覧から確認できます。</div>':`<div class="notice">大会終了後は試合結果や大会情報の変更が制限されます。すべての結果・順位・決勝結果を確認してから終了してください。${unfinished.length?' 未終了の試合があります。終了前に確認してください。':''}</div><button type="button" class="btn wide" id="completeTournamentButton" ${can&&!unfinished.length?'':'disabled'}>${tournamentCloseState.busy?'終了処理中…':'大会を終了する'}</button>${unfinished.length?'<p class="prompt">未終了の試合があるため、終了ボタンを無効にしています。</p>':''}`}${tournamentCloseState.message?`<div role="status" class="${tournamentCloseState.ok?'notice blue':'empty-error'}">${esc(tournamentCloseState.message)}</div>`:''}</div>`;
 }
 async function completeTournamentFromUi(){
  if(tournamentCloseState.busy||state.loading||!client)return;
@@ -3927,7 +3927,7 @@ async function completeTournamentFromUi(){
  if(ms.some(m=>!['completed','walkover'].includes(m.status))){tournamentCloseState.message='未終了の試合があります。最新データを確認してください。';tournamentCloseState.ok=false;render();return;}
  if(!confirm(`【大会終了の最終確認】\n大会：${t.name}\n\n終了後は試合結果などを変更できません。すべての結果・順位・決勝結果を確認しましたか？\n\nこの大会を終了しますか？`))return;
  tournamentCloseState.busy=true;tournamentCloseState.message='';render();
- try{const {error}=await client.rpc('admin_complete_tournament',{p_tournament_id:t.id});if(error)throw error;tournamentCloseState.ok=true;tournamentCloseState.message='大会を終了しました。';await loadData();}
+ try{const {error}=await client.rpc('admin_complete_tournament',{p_tournament_id:t.id});if(error)throw error;tournamentCloseState.ok=true;tournamentCloseState.message='';await loadData();}
  catch(e){tournamentCloseState.ok=false;tournamentCloseState.message='大会を終了できませんでした：'+e.message;await loadData();}
  finally{tournamentCloseState.busy=false;render();}
 }
