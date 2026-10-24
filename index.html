@@ -919,6 +919,39 @@ function schedulePlanningSection(t,categories,officialCourtCount,ready){
  }
  return `<h2>仮スケジュールの実現性チェック</h2><div class="card stack"><div><label for="qualificationMinutes">予選終了から決勝開始までの確認時間（分）</label><select class="field" id="qualificationMinutes">${[0,10,15,20,30,45,60].map(n=>opt(String(n),`${n}分`,String(qualificationMinutes))).join('')}</select></div><p class="prompt">休憩 ${esc(rest)}分、最大連続試合 ${esc(maxConsecutive)}試合、公式戦コート ${esc(officialCourtCount)}面。開始後90分と終了前60分を運営用に確保します。</p>${output}<p class="prompt">これは募集段階の仮ペアと仮の勝敗による4パターンの試算です。全パターンの保証ではありません。ダブルエントリー、進行遅延は未反映。配置は簡易探索のため、未配置でも開催不可能とは限りません。Supabaseへの保存はありません。</p></div>`;
 }
+// 募集計画の開催可否目安。既存の仮配置計算を再利用し、保存は行わない。
+function capacityFeasibilitySummary(t,categories){
+ if(!t||!categories.length)return '';
+ const courts=state.courts.filter(c=>c.tournament_id===t.id&&c.is_active&&c.court_type==='official').length;
+ const start=parseWindowMinute(t.start_time?.slice(0,5)),end=parseWindowMinute(t.end_time?.slice(0,5));
+ if(!courts||start===null||end===null)return '<div class="notice">開催可否の試算には開催時間と公式戦用コートの登録が必要です。</div>';
+ const duration=Number(t.match_minutes),playable=end-start-EVENT_PREP_MINUTES-EVENT_CLOSE_MINUTES;
+ if(!Number.isFinite(duration)||duration<=0||playable<=0)return '<div class="notice">開催時間と試合時間を確認してください。</div>';
+ const plans=categories.map(c=>{const p=getCapacityPlan(t.id,c.id);return {c,p,result:planGroupings(p.pairs,p.advance,p.groupSize,p.finalFormat||'knockout')};});
+ if(plans.some(x=>!x.result))return '<div class="notice">募集ペア数・予選組人数・進出条件を確認してください。</div>';
+ const required=plans.reduce((n,x)=>n+x.result.total,0),maxSlots=Math.floor(playable/duration)*courts;
+ const suggestions=[];
+ if(required>maxSlots){const shortage=required-maxSlots;suggestions.push(`最低でも${shortage}試合分の枠が不足しています。募集ペア数を減らすか、試合時間を短くしてください。`);}
+ const windows=categories.some(c=>{const d=getWindowDraft(t.id,c);return !!(d.start||d.end||d.max||d.preferred)});
+ let runs=null,problem='';
+ try{
+  if(windows){runs=Array.from({length:4},(_,i)=>simulateFlexibleSchedule(t,categories,courts,planningSimulation.qualificationMinutes,i));}
+  else{
+   const config=plans.map(({c,p})=>({name:c.name,pairs:Number(p.pairs),groupMax:Number(p.groupSize),advance:Number(p.advance),finalFormat:p.finalFormat||'knockout'}));
+   const calc=v10ScheduleEngine.simulate({start:minuteClock(start+EVENT_PREP_MINUTES),end:minuteClock(end),reservedMinutes:EVENT_CLOSE_MINUTES,matchMinutes:duration,restMinutes:Number(t.minimum_rest_minutes||0),maxConsecutive:Number(t.max_consecutive_matches||2),courts,qualificationMinutes:planningSimulation.qualificationMinutes,categories:config,scenarios:4});
+   runs=calc.runs;
+  }
+ }catch(e){problem=e.message;}
+ const pass=runs?runs.filter(r=>r.status==='fits_scenario').length:0;
+ if(runs&&pass<4){
+  const worst=runs.reduce((a,r)=>Math.max(a,Math.max(0,Number(r.total||0)-Number(r.scheduled||0))),0);
+  suggestions.push(`仮配置で未配置の試合があります${worst?'（最大'+worst+'試合）':''}。募集ペア数を減らす、予選組人数を変更する、またはカテゴリー別の開催枠・最大使用面数を見直してください。`);
+ }
+ if(!runs&&problem)suggestions.push('カテゴリー別の開催時間・使用面数、募集条件を確認してください。');
+ const ok=!!runs&&pass===4;
+ const status=ok?'開催可能の見込み：仮配置4ケースすべてで時間内に収まりました。':required>maxSlots?'開催困難：理論上の試合枠が不足しています。':runs?'要調整：仮配置で時間内に収まらないケースがあります。':'試算条件を確認してください。';
+ return `<section class="card stack" aria-label="開催可否の目安"><h3>開催可否の目安</h3><div class="notice ${ok?'blue':''}"><b>${esc(status)}</b></div><p class="prompt">必要 ${required}試合 ／ 理論枠 ${maxSlots}試合 ／ 公式戦 ${courts}面 ／ 試合可能時間 ${playable}分</p>${suggestions.length?`<p><b>調整案</b>：${esc(suggestions.join(' '))}</p>`:''}${problem?`<p class="prompt">試算できない理由：${esc(problem)}</p>`:''}<p class="prompt">試合前90分・試合後60分を確保。カテゴリー別時間設定（未保存の入力も含む）を考慮します。仮の勝敗による簡易配置のため、成功は開催保証ではなく、失敗も開催不可能の証明ではありません。実際の試合・時間割は変更しません。</p></section>`;
+}
 const capacityOpenCards = new Set();
 function capacityPlanningSection(t,categories,availableSlots){
  if(!t)return '';
@@ -942,7 +975,7 @@ function capacityPlanningSection(t,categories,availableSlots){
  const ready=availableSlots!==null&&Number.isFinite(availableSlots);
  const ratio=valid&&ready&&availableSlots>0?required/availableSlots*100:null;
  const summary=categories.length===0?'<div class="notice">募集枠を試算するには、先にカテゴリーを追加してください。</div>':!valid?'<div class="notice">入力値に不備があります。すべてのカテゴリーの募集ペア数を確認してください。</div>':!ready?'<div class="notice">収容力を比較するには開催時間と公式戦用コートを設定・取得してください。</div>':`<div class="metrics"><div class="metric"><small>必要試合数</small><strong>${required}</strong></div><div class="metric"><small>理論試合枠</small><strong>${availableSlots}</strong></div><div class="metric"><small>残り枠（概算）</small><strong>${availableSlots-required}</strong></div></div>${ratio===null?'<div class="notice">理論上の試合枠が0です。</div>':`<div class="progress"><div style="width:${Math.min(100,ratio)}%;background:${ratio>100?'#bb5949':'#219a7b'}"></div></div><p class="prompt">理論枠使用率：${ratio.toFixed(1)}%</p>`}<div class="notice ${required>availableSlots?'':'blue'}">${required>availableSlots?'必要試合数が理論枠を超えています。':'試合数は理論枠内ですが、時間内に終了できる保証はありません。'}</div>`;
- return `<h2>大会全体の募集枠シミュレーション</h2>${cards.join('')}${summary}<p class="prompt">収容力は概算です。時間割作成時に確認してください。</p>`;
+ return `<h2>大会全体の募集枠シミュレーション</h2>${cards.join('')}${summary}${capacityFeasibilitySummary(t,categories)}<p class="prompt">収容力は概算です。時間割作成時に確認してください。</p>`;
 }
 
 const v10ScheduleEngine=(()=>{
