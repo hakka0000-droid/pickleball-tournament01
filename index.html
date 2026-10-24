@@ -947,6 +947,7 @@ function calculateCapacityPlacement(){
  setTimeout(()=>{
   try{
    capacityPlacement.runs=capacityPlacementRuns(t,categories,courts);
+   capacityPlacement.key=capacityPlacementKey(t,categories,courts);
    capacityPlacement.message='仮の勝ち上がり4ケースのカテゴリー別結果です。';
   }catch(err){capacityPlacement.message='試算できませんでした：'+(err.message||String(err));capacityPlacement.runs=null;}
   capacityPlacement.busy=false;render();
@@ -964,8 +965,9 @@ function capacityFeasibilitySummary(t,categories){
  const required=plans.reduce((n,x)=>n+x.result.total,0),maxSlots=Math.floor(playable/duration)*courts;
  const currentKey=capacityPlacementKey(t,categories,courts);
  const valid=capacityPlacement.key===currentKey;
- const runs=valid?capacityPlacement.runs:null;
- let table='',message=valid?capacityPlacement.message:'現在の設定でボタンを押すと、カテゴリー別の未配置試合数を確認できます。';
+ const runs=capacityPlacement.runs;
+ let table='',message=capacityPlacement.message||'現在の設定でボタンを押すと、カテゴリー別の未配置試合数を確認できます。';
+ if(!valid&&runs)message+='（計算後に設定が変更された可能性があります。最新条件で再計算してください。）';
  if(runs&&runs.length){
   const rows=categories.map((c,i)=>{
    const total=plans[i].result.total;
