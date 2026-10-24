@@ -2596,32 +2596,37 @@ function printScoreSheets(){
    const group=m.group_name?' ／ '+safe(m.group_name)+'組':'';
    const time=m.start_time?new Date(m.start_time).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'}):'未設定';
    const team=id=>id?pairName(id):'対戦相手未確定';
-   return `<section class="score-card"><div class="card-header"><strong>試合スコア表</strong><span>${safe(matchCode(m)||'No.'+(i+1))}</span></div><div class="meta">${safe(cat?.name||'カテゴリー未設定')} ／ ${type}${group}</div><div class="meta">${safe(time)}　${safe(m.court_id?courtName(m.court_id):'コート未設定')}</div><div class="match-line"><span class="pair-name">${safe(team(m.pair_a_id))}</span><span class="score-input">＿＿ - ＿＿</span><span class="pair-name">${safe(team(m.pair_b_id))}</span></div><div class="pair-labels"><span>Aペア</span><span>スコア</span><span>Bペア</span></div><div class="signatures"><span>勝者署名：____________</span><span>敗者署名：____________</span></div></section>`;
+   return `<section class="score-card"><div class="card-header"><strong>試合スコア表</strong><span>${safe(matchCode(m)||'No.'+(i+1))}</span></div><div class="meta meta-row"><span class="category-name">${safe(cat?.name||'カテゴリー未設定')} ／ ${type}${group}</span><span class="time-court">${safe(time)}　${safe(m.court_id?courtName(m.court_id):'コート未設定')}</span></div><div class="match-line"><span class="pair-name">${safe(team(m.pair_a_id))}</span><span class="score-area"><span class="score-label">スコア</span><span class="score-input">＿＿ - ＿＿</span></span><span class="pair-name">${safe(team(m.pair_b_id))}</span></div><div class="signatures"><span>勝者署名：____________</span><span>敗者署名：____________</span></div></section>`;
  });
  const pages=[];
  for(let i=0;i<cards.length;i+=12){
    const slots=Array.from({length:12},(_,j)=>`<div class="slot${cards[i+j]?'':' empty'}">${cards[i+j]||''}</div>`).join('');
-   pages.push(`<div class="sheet">${slots}<div class="vertical-cut" aria-hidden="true"></div>${[1,2,3,4,5].map(n=>`<div class="horizontal-cut" style="top:${n*43}mm" aria-hidden="true"></div>`).join('')}</div>`);
+   pages.push(`<div class="sheet">${slots}<div class="vertical-cut" aria-hidden="true"></div>${[1,2,3,4,5].map(n=>`<div class="horizontal-cut" style="top:${n*39}mm" aria-hidden="true"></div>`).join('')}</div>`);
  }
  const html=`<!doctype html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safe(t.name)}｜スコア表</title><style>
  @page{size:A4 portrait;margin:10mm}
  *{box-sizing:border-box}
  html,body{margin:0;padding:0;color:#182832;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN',Meiryo,sans-serif}
  .toolbar{padding:12px;text-align:center}.toolbar button{padding:10px 18px;font-size:15px}.heading{text-align:center;font-size:17px;margin:8px}
- /* 180 x 258mm: each page has 12 slots, with spare printable height for iOS page rounding. */
- .sheet{position:relative;width:180mm;height:258mm;display:grid;grid-template-columns:repeat(2,90mm);grid-template-rows:repeat(6,43mm);margin:0 auto;break-after:page;page-break-after:always;overflow:hidden}
+ /* 12 slips per A4 page. Fixed page units prevent a slip from crossing a page. */
+ .sheet{position:relative;width:180mm;height:234mm;display:grid;grid-template-columns:repeat(2,90mm);grid-template-rows:repeat(6,39mm);margin:8mm auto 0;break-after:page;page-break-after:always;overflow:hidden}
  .sheet:last-child{break-after:auto;page-break-after:auto}
- .slot{min-width:0;min-height:0;position:relative;padding:1.6mm;overflow:hidden}
- .score-card{width:100%;height:100%;overflow:hidden;border:0.3mm solid #222;padding:1.6mm 1.8mm;font-size:7.7pt;line-height:1.18}
+ .slot{min-width:0;min-height:0;position:relative;padding:2mm 1.8mm;display:flex;align-items:center;overflow:hidden}
+ .score-card{width:100%;height:auto;overflow:hidden;border:0.3mm solid #222;padding:1.7mm 1.8mm;font-size:7.5pt;line-height:1.2}
  .slot.empty .score-card{display:none}
- /* Independent absolute cut lines are drawn above slots and remain visible between both columns. */
- .vertical-cut{position:absolute;z-index:5;pointer-events:none;left:calc(50% - 0.15mm);top:0;bottom:0;border-left:0.3mm dashed #555}
+ /* Identical dashed cut-line design for vertical and horizontal guides. */
+ .vertical-cut{position:absolute;z-index:5;pointer-events:none;left:90mm;top:0;bottom:0;border-left:0.25mm dashed #777}
  .horizontal-cut{position:absolute;z-index:5;pointer-events:none;left:0;right:0;border-top:0.25mm dashed #777}
  .card-header{display:flex;justify-content:space-between;gap:2mm;font-size:9pt;font-weight:bold;border-bottom:0.2mm solid #283c48;padding-bottom:0.5mm}
- .meta{font-size:7.4pt;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:0.7mm}
- .match-line{display:grid;grid-template-columns:minmax(0,1fr) 17mm minmax(0,1fr);align-items:center;gap:0.6mm;margin-top:1.7mm;min-height:8mm;border-top:0.2mm solid #b7c0c5;border-bottom:0.2mm solid #b7c0c5;text-align:center;font-weight:600}
- .pair-name{min-width:0;overflow-wrap:anywhere;line-height:1.12;font-size:7.4pt}.score-input{font-size:9pt;font-weight:700;white-space:nowrap}
- .pair-labels{display:grid;grid-template-columns:1fr 17mm 1fr;text-align:center;font-size:6.3pt;color:#45535c;margin-top:0.3mm}
+ .meta{font-size:7.2pt;margin-top:1.1mm}
+ .meta-row{display:flex;justify-content:space-between;align-items:baseline;gap:1mm;white-space:nowrap}
+ .category-name{min-width:0;overflow:hidden;text-overflow:ellipsis}
+ .time-court{flex-shrink:0;text-align:right}
+ .match-line{display:grid;grid-template-columns:minmax(0,1fr) 18mm minmax(0,1fr);align-items:center;gap:0.5mm;margin-top:1.6mm;min-height:9mm;border-top:0.2mm solid #b7c0c5;border-bottom:0.2mm solid #b7c0c5;text-align:center;font-weight:600}
+ .pair-name{min-width:0;overflow-wrap:anywhere;line-height:1.13;font-size:7.3pt}
+ .score-area{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.1mm}
+ .score-label{font-size:6.2pt;font-weight:400;line-height:1}
+ .score-input{font-size:8.8pt;font-weight:700;white-space:nowrap;line-height:1.15}
  .signatures{display:flex;justify-content:space-between;gap:1mm;margin-top:1.6mm;font-size:7pt;white-space:nowrap}
  @media print{.toolbar,.heading{display:none!important}html,body{width:190mm!important;margin:0!important;padding:0!important}.sheet{break-inside:avoid;page-break-inside:avoid;print-color-adjust:exact;-webkit-print-color-adjust:exact}}
  </style></head><body><div class="toolbar"><button onclick="window.print()">印刷する / PDFとして保存</button></div><h1 class="heading">${safe(t.name)}｜スコア表（${ms.length}試合）</h1>${pages.join('')}</body></html>`;
