@@ -3214,6 +3214,18 @@ function championSummary(slots) {
   const score=isWalkover(finalMatch)?'決勝：不戦勝':`決勝：${finalMatch.score_a} – ${finalMatch.score_b}`;
   return `<div class="champion-panel" aria-label="決勝結果から算出した優勝ペア"><div class="champion-kicker">🏆 CHAMPION · 優勝ペア</div><div class="champion-name">${esc(pairName(winnerId))}</div><div class="champion-result">${esc(score)}</div><p class="champion-caption">試合結果から算出した表示です（正式確定前）。</p></div>`;
 }
+function unifiedChampionSummary(categoryId,slots,games){
+ const official=officialFor(categoryId);
+ if(official?.status==='confirmed'&&official.champion_pair_id){
+  return `<div class="champion-panel" aria-label="正式確定済みの優勝ペア"><div class="champion-kicker">🏆 優勝ペア</div><div class="champion-name">${esc(pairName(official.champion_pair_id))}</div><p class="champion-caption">正式確定済み</p></div>`;
+ }
+ const ids=[...new Set(games.flatMap(m=>[m.pair_a_id,m.pair_b_id].filter(Boolean)))];
+ const roundRobin=games.length===3&&ids.length===3&&games.every(m=>m.pair_a_id&&m.pair_b_id&&m.pair_a_id!==m.pair_b_id)&&ids.every(id=>games.filter(m=>m.pair_a_id===id||m.pair_b_id===id).length===2);
+ if(roundRobin){
+  return `<div class="champion-panel champion-pending" aria-label="優勝ペア未確定"><div class="champion-kicker">🏆 優勝ペア：未確定</div><p class="champion-caption">決勝リーグの結果を正式確定すると表示します。</p></div>`;
+ }
+ return championSummary(slots);
+}
 function finalRoundRobinTable(games,categoryId){
  if(games.length!==3)return '';
  const ids=[...new Set(games.flatMap(m=>[m.pair_a_id,m.pair_b_id].filter(Boolean)))];
@@ -3259,7 +3271,7 @@ function bracket(){
   const diagrams=byStage.map(stageId=>{
     const stage=state.stages.find(s=>s.id===stageId);
     const slots=state.bracketSlots.filter(s=>s.stage_id===stageId);
-    return `<section class="bracket-stage"><h2>${esc(catName(stage?.category_id))} / ${esc(stage?.name||'決勝トーナメント')}</h2>${slots.length?championSummary(slots):''}${officialPanel(stage?.category_id,slots,stageId)}${finalRoundRobinTable(ms.filter(m=>m.stage_id===stageId),stage?.category_id)|| (slots.length?slotDiagram(slots,stage?.category_id,stageId):`<div class="notice">対戦枠の読み取りができません。表示用RPCを設定するか「更新」を押してください。<br><small>${esc(state.bracketError)}</small></div><div class="grid">${ms.filter(m=>m.stage_id===stageId).map(matchCard).join('')}</div>`)}</section>`;
+    return `<section class="bracket-stage"><h2>${esc(catName(stage?.category_id))} / ${esc(stage?.name||'決勝トーナメント')}</h2>${unifiedChampionSummary(stage?.category_id,slots,ms.filter(m=>m.stage_id===stageId))}${officialPanel(stage?.category_id,slots,stageId)}${finalRoundRobinTable(ms.filter(m=>m.stage_id===stageId),stage?.category_id)|| (slots.length?slotDiagram(slots,stage?.category_id,stageId):`<div class="notice">対戦枠の読み取りができません。表示用RPCを設定するか「更新」を押してください。<br><small>${esc(state.bracketError)}</small></div><div class="grid">${ms.filter(m=>m.stage_id===stageId).map(matchCard).join('')}</div>`)}</section>`;
   }).join('');
   return `${controls()}<h2>決勝トーナメント</h2>${diagrams||'<div class="empty">決勝トーナメントの試合はまだありません。</div>'}`;
 }
