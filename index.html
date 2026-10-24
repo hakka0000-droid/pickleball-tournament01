@@ -1289,10 +1289,10 @@ function publicScreen(){
    const focus=publicSelectedPairId!=='all';
    const own=focus?(m.pair_a_id===publicSelectedPairId?m.pair_a_id:m.pair_b_id):null;
    const opponent=focus?(m.pair_a_id===publicSelectedPairId?m.pair_b_id:m.pair_a_id):null;
-   const teams=focus?`<div class="public-match-teams">${esc(pairName(own))}</div><div class="public-match-opponent">対 ${esc(pairName(opponent))}</div>`:`<div class="public-match-teams">${esc(pairName(m.pair_a_id))} <span class="public-match-vs">対</span> ${esc(pairName(m.pair_b_id))}</div>`;
+   const teams=focus?`<div class="public-match-teams">${esc(pairName(own))}</div><div class="public-match-opponent">${opponent?'対 '+esc(pairName(opponent)):'対戦相手未確定'}</div>`:`<div class="public-match-teams">${esc(pairName(m.pair_a_id))} <span class="public-match-vs">対</span> ${esc(pairName(m.pair_b_id))}</div>`;
    return `<article class="public-match-row"><div class="public-match-top"><span>${selectedCat==='all'?esc(catName(m.category_id))+' ／ ':''}${esc(isThirdPlaceMatch(m)?'3位決定戦':stageLabel(m))}${matchCode(m)?' ／ '+esc(matchCode(m)):''}</span></div><div class="public-match-when"><strong>${esc(timeOf(m))}</strong><strong>${esc(courtName(m.court_id))}</strong></div>${teams}${result?`<div class="public-match-result">${result}</div>`:''}</article>`;
   }).join('');
-  return `<h2>試合予定・結果</h2>${selector}${filters}<div class="public-list-title">${esc(selected.name)} <span>${items.length}試合</span></div><div class="public-match-list">${rows||'<div class="empty">該当する試合はありません。</div>'}</div>`;
+  return `<h2>試合予定・結果</h2>${selector}${filters}<div class="public-list-title"><span>${items.length}試合</span></div><div class="public-match-list">${rows||'<div class="empty">該当する試合はありません。</div>'}</div>`;
  }
  const results=state.officialResults.filter(r=>catids.has(r.category_id)&&r.status==='confirmed');
  return `<h2>順位・決勝</h2>${selector}${!selector?`<div class="public-list-title">${esc(selected.name)}</div>`:''}${results.map(r=>`<section class="card public-result-card"><h3>${esc(catName(r.category_id))}</h3><dl class="public-results-details"><dt>優勝</dt><dd>${esc(pairName(r.champion_pair_id))}</dd><dt>準優勝</dt><dd>${esc(pairName(r.runner_up_pair_id))}</dd><dt>3位</dt><dd>${esc(r.third_place_pair_id?pairName(r.third_place_pair_id):'該当なし')}</dd></dl></section>`).join('')||'<div class="empty">確定した大会結果はまだありません。</div>'}`;
