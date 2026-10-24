@@ -24,6 +24,23 @@
 .bracket-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:#536b77;margin:8px 0 12px}
 .bracket-stage{margin-bottom:24px}
 
+
+/* Mobile knockout layout: keep desktop bracket untouched. */
+.bracket-mobile{display:none}
+@media(max-width:759px){
+ .bracket-desktop{display:none}
+ .bracket-mobile{display:grid;gap:12px}
+ .bracket-mobile-round{display:grid;gap:9px}
+ .bracket-mobile-title{font-size:14px;font-weight:800;color:#365966;margin:6px 0 0}
+ .bracket-mobile-match{background:#fff;border:1px solid #d5e2e7;border-radius:12px;padding:12px;min-width:0}
+ .bracket-mobile-match.final-winner{border-color:#50a180;background:#f3faf6}
+ .bracket-mobile-head{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12px;color:#536b77;margin-bottom:9px}
+ .bracket-mobile-team{display:flex;justify-content:space-between;gap:10px;padding:7px 6px;border-radius:6px;font-size:13px;overflow-wrap:anywhere}
+ .bracket-mobile-team.win{background:#e0f5e9;color:#0b7254;font-weight:800}
+ .bracket-mobile-match button{width:100%;margin-top:10px;padding:10px}
+ .bracket-mobile-arrow{text-align:center;color:#72949c;font-size:20px;line-height:1}
+}
+
 /* Winner summary: UI-derived only, not an official certification */
 .champion-panel{border:1px solid #c6e1d5;border-radius:16px;background:linear-gradient(130deg,#f0faf5,#fff);padding:18px;margin:12px 0 17px;text-align:center}
 .champion-kicker{font-size:12px;font-weight:800;letter-spacing:.09em;color:#317b5c}
@@ -3194,7 +3211,29 @@ function slotDiagram(slots,cat,stage){
     const label=isThirdPlaceMatch(m)?'3位決定戦':s.round_number===highest?'決勝':s.round_number===highest-1?'準決勝':`${s.round_number}回戦`;
     return `<div class="bracket-match ${s.round_number===highest&&winner?'final-winner':''}" style="left:${x}px;top:${y}px"><div class="bracket-head"><span>${matchCode(m)?`<b class="match-number">${esc(matchCode(m))}</b> ／ `:''}${esc(label)} ${s.match_number}</span><span>${isWalkover(m)?'不戦勝':isDone(m)?'終了':m.status==='playing'?'試合中':'予定'}</span></div>${line(m.pair_a_id,m.score_a)}${line(m.pair_b_id,m.score_b)}${state.staff&&!officialLocked(m.category_id)&&m.pair_a_id&&m.pair_b_id?`<button class="btn secondary" data-edit="${esc(m.id)}">結果を操作</button>`:''}</div>`;
   }).join('');
-  return `<div class="bracket-legend"><span>緑：勝者</span><span>線：次の対戦</span></div><div class="bracket-scroller"><div class="bracket-board" style="width:${boardWidth}px;height:${boardHeight}px"><svg class="bracket-lines" width="${boardWidth}" height="${boardHeight}" viewBox="0 0 ${boardWidth} ${boardHeight}" aria-hidden="true">${path}</svg>${cards}</div></div>`;
+  const mobileRoundNames=new Map();
+  const normalSlots=ordered.filter(s=>!isThirdPlaceMatch(matchById.get(s.match_id)));
+  const normalHighest=Math.max(...normalSlots.map(s=>s.round_number));
+  const mobileCard=s=>{
+    const m=matchById.get(s.match_id);
+    if(!m)return '<div class="bracket-mobile-match">試合情報を取得できません</div>';
+    const third=isThirdPlaceMatch(m);
+    const winner=isWalkover(m)?m.walkover_winner_pair_id:isDone(m)?(m.score_a>m.score_b?m.pair_a_id:m.pair_b_id):null;
+    const done=isWalkover(m)||isDone(m);
+    const unresolved=!m.pair_a_id||!m.pair_b_id;
+    const label=third?'3位決定戦':s.round_number===normalHighest?'決勝':s.round_number===normalHighest-1?'準決勝':`${s.round_number}回戦`;
+    const status=isWalkover(m)?'不戦勝':isDone(m)?'終了':m.status==='playing'?'試合中':'予定';
+    const team=(id,score)=>`<div class="bracket-mobile-team ${winner&&winner===id?'win':''}"><span>${esc(pairName(id))}</span><b>${score??''}</b></div>`;
+    return `<div class="bracket-mobile-match ${winner&&s.round_number===normalHighest&&!third?'final-winner':''}"><div class="bracket-mobile-head"><span>${matchCode(m)?`<b class="match-number">${esc(matchCode(m))}</b> ／ `:''}${esc(label)} ${s.match_number}</span><span class="status ${done?'done':m.status==='playing'?'pending':''}">${esc(status)}</span></div>${unresolved?'<p class="prompt">対戦相手の確定待ち</p>':team(m.pair_a_id,m.score_a)+team(m.pair_b_id,m.score_b)}${state.staff&&!officialLocked(m.category_id)&&!unresolved?`<button class="btn secondary" data-edit="${esc(m.id)}">${done?'結果を確認':'結果を入力'}</button>`:''}</div>`;
+  };
+  const mobileRounds=[...new Set(normalSlots.map(s=>s.round_number))].sort((a,b)=>a-b).map((round,i)=>{
+    const title=round===normalHighest?'決勝':round===normalHighest-1?'準決勝':`${round}回戦`;
+    return `${i?'<div class="bracket-mobile-arrow" aria-hidden="true">↓</div>':''}<div class="bracket-mobile-round"><div class="bracket-mobile-title">${esc(title)}</div>${normalSlots.filter(s=>s.round_number===round).map(mobileCard).join('')}</div>`;
+  }).join('');
+  const thirdSlots=ordered.filter(s=>isThirdPlaceMatch(matchById.get(s.match_id)));
+  const mobileThird=thirdSlots.length?`<div class="bracket-mobile-round"><div class="bracket-mobile-title">3位決定戦</div>${thirdSlots.map(mobileCard).join('')}</div>`:'';
+  const mobile=`<div class="bracket-mobile">${mobileRounds}${mobileThird}</div>`;
+  return mobile+`<div class="bracket-desktop"><div class="bracket-legend"><span>緑：勝者</span><span>線：次の対戦</span></div><div class="bracket-scroller"><div class="bracket-board" style="width:${boardWidth}px;height:${boardHeight}px"><svg class="bracket-lines" width="${boardWidth}" height="${boardHeight}" viewBox="0 0 ${boardWidth} ${boardHeight}" aria-hidden="true">${path}</svg>${cards}</div></div></div>`;
 }
 function championSummary(slots) {
   if (!slots.length) return '';
