@@ -3282,7 +3282,7 @@ const groupKey=(cat,group)=>cat+'::'+group;
 function rankingGroups(){
  const ms=visibleMatches().filter(m=>stageFor(m)?.stage_type==='preliminary'&&m.group_name);
  const keys=[...new Set(ms.map(m=>groupKey(m.category_id,m.group_name)))];
- return keys.map(key=>{const m=ms.find(x=>groupKey(x.category_id,x.group_name)===key);return {key,cat:m.category_id,group:m.group_name,games:ms.filter(x=>groupKey(x.category_id,x.group_name)===key)};});
+ return keys.map(key=>{const m=ms.find(x=>groupKey(x.category_id,x.group_name)===key);return {key,cat:m.category_id,group:m.group_name,games:ms.filter(x=>groupKey(x.category_id,x.group_name)===key)};}).sort((a,b)=>{const ca=state.categories.find(c=>c.id===a.cat),cb=state.categories.find(c=>c.id===b.cat);return (Number(ca?.display_order??0)-Number(cb?.display_order??0))||String(ca?.name||'').localeCompare(String(cb?.name||''),'ja')||String(a.group).localeCompare(String(b.group),'ja',{numeric:true});});
 }
 async function refreshRankings(){
  if(!client||state.loading)return;
