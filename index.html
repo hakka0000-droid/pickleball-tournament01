@@ -1079,17 +1079,37 @@ const calculatedFinal=slots=>{
  return {champion:winner,runnerUp:winner===m.pair_a_id?m.pair_b_id:m.pair_a_id};
 };
 function officialPanel(categoryId,slots,stageId){
- const result=officialFor(categoryId), locked=result?.status==='confirmed',calculated=calculatedFinal(slots);
+ const result=officialFor(categoryId),locked=result?.status==='confirmed';
  if(!state.officialLoaded||state.officialError)return `<div class="notice">正式結果の取得に失敗しました。操作できません。${esc(state.officialError)}</div>`;
+ const stageMatches=state.matches.filter(m=>m.stage_id===stageId);
+ const pairIds=[...new Set(stageMatches.flatMap(m=>[m.pair_a_id,m.pair_b_id].filter(Boolean)))];
+ const isRoundRobin=stageMatches.length===3&&pairIds.length===3&&stageMatches.every(m=>m.pair_a_id&&m.pair_b_id&&m.pair_a_id!==m.pair_b_id)&&pairIds.every(id=>stageMatches.filter(m=>m.pair_a_id===id||m.pair_b_id===id).length===2);
+ const allCompleted=stageMatches.length>0&&stageMatches.every(m=>(isDone(m)&&m.score_a!==m.score_b)||(isWalkover(m)&&m.walkover_winner_pair_id));
+ let calculated=calculatedFinal(slots),thirdCandidate=null;
+ if(isRoundRobin){
+  calculated=null;
+  if(allCompleted){
+   const ranking=pairIds.map(id=>{
+    let wins=0,diff=0;
+    stageMatches.filter(m=>m.pair_a_id===id||m.pair_b_id===id).forEach(m=>{
+     const winner=isWalkover(m)?m.walkover_winner_pair_id:(m.score_a>m.score_b?m.pair_a_id:m.pair_b_id);
+     if(winner===id)wins++;
+     if(isDone(m))diff+=Number(m.pair_a_id===id?m.score_a-m.score_b:m.score_b-m.score_a);
+    });
+    return {id,wins,diff};
+   }).sort((a,b)=>b.wins-a.wins||b.diff-a.diff||pairName(a.id).localeCompare(pairName(b.id),'ja'));
+   calculated={champion:ranking[0].id,runnerUp:ranking[1].id};
+   thirdCandidate=ranking[2].id;
+  }
+ }
+ const ready=isRoundRobin?allCompleted:!!calculated&&slots.length>0&&stageMatches.length===slots.length&&allCompleted;
  const status=locked?'正式確定済み':result?.status==='revoked'?'確定取消済み':'未確定';
  const first=locked?result.champion_pair_id:calculated?.champion;
  const second=locked?result.runner_up_pair_id:calculated?.runnerUp;
- const third=locked?result.third_place_pair_id:null;
- const stageMatches=state.matches.filter(m=>m.stage_id===stageId);
- const ready=!!calculated&&slots.length>0&&stageMatches.length===slots.length&&stageMatches.every(m=>(isDone(m)&&m.score_a!==m.score_b)||(isWalkover(m)&&m.walkover_winner_pair_id));
+ const third=locked?result.third_place_pair_id:thirdCandidate;
  const admin=result?.is_admin===true;
  const actions=!state.staff?'':locked?(admin?`<button class="btn secondary" data-official-revoke="${esc(categoryId)}">正式確定を取り消す</button>`:'<span class="prompt">確定取消は大会管理者のみ可能です。</span>'):`<button class="btn" data-official-confirm="${esc(categoryId)}" ${ready?'':'disabled'}>優勝・準優勝・3位を正式確定</button>`;
- return `<div class="official-panel ${locked?'confirmed':''}"><div class="official-head"><b>正式結果</b><span class="status ${locked?'done':'pending'}">${esc(status)}</span></div><div class="official-ranks"><div class="official-rank"><span>優勝</span><b>${esc(first?pairName(first):'未確定')}</b></div><div class="official-rank"><span>準優勝</span><b>${esc(second?pairName(second):'未確定')}</b></div><div class="official-rank"><span>3位</span><b>${esc(locked?(third?pairName(third):'該当なし'):'未確定')}</b></div></div><p class="prompt">${locked?'正式確定済みです。':ready?'確定前の候補です。':'全試合の終了後に確定できます。'}</p><div class="official-actions">${actions}</div></div>`;
+ return `<div class="official-panel ${locked?'confirmed':''}"><div class="official-head"><b>正式結果</b><span class="status ${locked?'done':'pending'}">${esc(status)}</span></div><div class="official-ranks"><div class="official-rank"><span>優勝</span><b>${esc(first?pairName(first):'未確定')}</b></div><div class="official-rank"><span>準優勝</span><b>${esc(second?pairName(second):'未確定')}</b></div><div class="official-rank"><span>3位</span><b>${esc(locked?(third?pairName(third):'該当なし'):(third?pairName(third):'未確定'))}</b></div></div><p class="prompt">${locked?'正式確定済みです。':ready?'確定前の候補です。':'全試合の終了後に確定できます。'}</p><div class="official-actions">${actions}</div></div>`;
 }
 const winnerName=m=>isWalkover(m)?pairName(m.walkover_winner_pair_id):isDone(m)?pairName(m.score_a>m.score_b?m.pair_a_id:m.pair_b_id):'';
 function areaOf(tab){return tab==='manage'?'prep':tab.startsWith('public_')?'public':'ops';}
