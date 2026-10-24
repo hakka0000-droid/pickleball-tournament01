@@ -469,6 +469,15 @@
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
+
+<style>
+.public-overview-details{display:grid;grid-template-columns:82px minmax(0,1fr);column-gap:14px;row-gap:15px;align-items:start;margin:18px 0 0}
+.public-overview-details dt{font-size:13px;color:#637685;margin:0;padding-top:3px}
+.public-overview-details dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.public-overview-badges{display:flex;flex-wrap:wrap;gap:7px}
+.public-overview-badge{display:inline-block;border-radius:999px;padding:6px 10px;background:#e7f2ee;color:#24685d;font-size:13px;line-height:1.35;font-weight:600}
+.public-overview-name{margin:0!important}
+</style>
 </head>
 <body>
 <header><div class="inner"><div class="authline"><span class="tag">Supabase v10 簡素化版プレビュー</span><span class="light mini">V9デザイン踏襲</span></div><h1>Pickleball Tournament Manager</h1><small class="light">試合確認・結果入力・順位チェック</small></div></header>
@@ -1226,7 +1235,22 @@ function publicScreen(){
  const catids=new Set(cats.map(c=>c.id));
  const ms=state.matches.filter(m=>catids.has(m.category_id));
  const heading=`${choose}${explanation}`;
- if(state.tab==='public_home')return `<h2>大会概要</h2><div class="card">${ts.length>1?`<label for="publicTournamentFilter">大会を選択</label><select class="field" id="publicTournamentFilter">${ts.map(t=>opt(t.id,`${t.name}（${t.event_date||'日付未設定'}）`,publicSelectedTournamentId)).join('')}</select>`:''}<h3 style="margin-top:${ts.length>1?'16px':'0'}">${esc(selected.name)}</h3><div style="display:grid;grid-template-columns:minmax(80px,auto) 1fr;gap:10px 14px;align-items:start"><span class="prompt">開催日</span><span>${esc(selected.event_date||'未設定')}</span><span class="prompt">開催時間</span><span>${esc((selected.start_time||'').slice(0,5)||'—')}〜${esc((selected.end_time||'').slice(0,5)||'—')}</span><span class="prompt">カテゴリー</span><span>${cats.map(c=>esc(c.name)).join('、')||'未登録'}</span><span class="prompt">試合数</span><span>${ms.length}試合</span></div></div>`;
+ if(state.tab==='public_home'){
+  const day=selected.event_date;
+  let dateText='未設定';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(day||'')){
+   const [y,m,d]=day.split('-').map(Number);
+   const dt=new Date(y,m-1,d);
+   if(dt.getFullYear()===y&&dt.getMonth()===m-1&&dt.getDate()===d)dateText=`${y}年${m}月${d}日（${'日月火水木金土'[dt.getDay()]}）`;
+  }
+  const begin=parseWindowMinute((selected.start_time||'').slice(0,5));
+  const finish=parseWindowMinute((selected.end_time||'').slice(0,5));
+  const displayRange=(a,b)=>a!==null&&b!==null&&a<b?`${minuteClock(a)}〜${minuteClock(b)}`:'未設定';
+  const matchHours=displayRange(begin===null?null:begin+30,finish===null?null:finish-30);
+  const receptionHours=displayRange(begin===null?null:begin+30,begin===null?null:begin+60);
+  const categoriesHtml=cats.length?`<div class="public-overview-badges">${cats.map(c=>`<span class="public-overview-badge">${esc(c.name)}</span>`).join('')}</div>`:'未登録';
+  return `<h2>大会概要</h2><div class="card public-overview">${ts.length>1?`<label for="publicTournamentFilter">大会を選択</label><select class="field" id="publicTournamentFilter">${ts.map(t=>opt(t.id,`${t.name}（${t.event_date||'日付未設定'}）`,publicSelectedTournamentId)).join('')}</select>`:`<h3 class="public-overview-name">${esc(selected.name)}</h3>`}<dl class="public-overview-details"><dt>開催日</dt><dd>${esc(dateText)}</dd><dt>開催時間</dt><dd>${esc(matchHours)}</dd><dt>受付時間</dt><dd>${esc(receptionHours)}</dd><dt>カテゴリー</dt><dd>${categoriesHtml}</dd></dl></div>`;
+ }
  if(state.tab==='public_matches')return `<h2>試合予定・結果</h2>${heading}<p class="prompt">${esc(selected.name)} ／ 全${ms.length}試合</p>${ms.slice().sort((a,b)=>(a.start_time||'').localeCompare(b.start_time||'')).map(m=>`<div class="card match"><div class="stage">${esc(catName(m.category_id))} ／ ${esc(isThirdPlaceMatch(m)?'3位決定戦':stageLabel(m))}${matchCode(m)?' ／ '+esc(matchCode(m)):''}</div><div class="teams">${esc(pairName(m.pair_a_id))} vs ${esc(pairName(m.pair_b_id))}</div><p class="prompt">${esc(timeOf(m))} ／ ${esc(courtName(m.court_id))}</p><b>${isWalkover(m)?'不戦勝：'+esc(winnerName(m)):isDone(m)?esc(m.score_a)+' - '+esc(m.score_b):'結果未確定'}</b></div>`).join('')||'<div class="empty">公開中の試合はありません。</div>'}`;
  return `<h2>順位・決勝</h2>${heading}<div class="notice">正式結果が登録されたカテゴリーのみ表示します。予選順位の公開一覧は未実装です。</div>${state.officialResults.filter(r=>catids.has(r.category_id)&&r.status==='confirmed').map(r=>`<div class="card"><h3>${esc(catName(r.category_id))}</h3><p>優勝：<b>${esc(pairName(r.champion_pair_id))}</b></p><p>準優勝：<b>${esc(pairName(r.runner_up_pair_id))}</b></p><p>3位：<b>${esc(r.third_place_pair_id?pairName(r.third_place_pair_id):'該当なし')}</b></p></div>`).join('')||'<div class="empty">公開できる正式結果はまだありません。</div>'}`;
 }
