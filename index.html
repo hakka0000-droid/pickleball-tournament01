@@ -1286,7 +1286,7 @@ async function changeStaffRole(id,nextRole){
  if(!confirm(`${label} の権限を「${nextRole==='admin'?'大会管理者':'一般スタッフ'}」に変更します。よろしいですか？`))return;
  staffListUi.busy=true;staffListUi.editing=id;staffListUi.message='';render();
  try{
-  const {data,error}=await client.rpc('update_tournament_staff_role',{p_tournament_id:tid,p_user_id:id,p_role:nextRole});
+  const {data,error}=await client.rpc('staff_update_tournament_role',{p_tournament_id:tid,p_user_id:id,p_new_role:nextRole});
   if(error)throw Error(error.message);
   if(data===false||data?.success===false)throw Error(data?.error||'変更できませんでした。');
   staffListUi.message='権限を変更しました。';
