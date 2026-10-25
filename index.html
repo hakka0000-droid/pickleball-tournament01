@@ -2616,6 +2616,8 @@ function printScoreSheets(){
  .slot.empty .score-card{display:none}
  /* Draw cut lines on the grid cells themselves so iOS print cannot drop an overlay. */
  .slot:nth-child(odd){border-right:0.26mm dashed #555}
+ /* A dedicated center cut guide remains visible in iPhone print/PDF previews. */
+ .sheet::after{content:"";position:absolute;top:0;bottom:0;left:calc(50% - 0.15mm);width:0.3mm;background:repeating-linear-gradient(to bottom,#555 0,#555 1.4mm,transparent 1.4mm,transparent 2.5mm);pointer-events:none;z-index:2;print-color-adjust:exact;-webkit-print-color-adjust:exact}
  .slot:nth-child(-n+12){border-bottom:0.26mm dashed #555}
  .card-header{display:flex;justify-content:space-between;gap:2mm;font-size:9pt;font-weight:bold;border-bottom:0.2mm solid #283c48;padding-bottom:0.5mm}
  .meta{font-size:7.2pt;margin-top:1.1mm}
