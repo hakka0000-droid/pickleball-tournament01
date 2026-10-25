@@ -518,6 +518,15 @@
  #screen>.page-content-head~h2:first-of-type{margin-top:5px}
  .wrap{padding-left:12px;padding-right:12px}
 }
+
+/* Staff list only: reduce excess whitespace on phones without changing controls. */
+@media screen and (max-width:759px){
+ .staff-list-heading{margin:14px 0 8px}
+ .staff-list-container{gap:9px;margin-bottom:0}
+ .staff-list-container .staff-list-card{margin:0;padding:13px 14px;gap:9px}
+ .staff-list-card .row{gap:8px;align-items:center}
+ .staff-list-card .mini-btn{min-height:38px;padding:8px 10px}
+}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
@@ -1333,9 +1342,9 @@ function staffManagementScreen(){
   const isSystemAdmin=knownSystemAdminEmails.has(String(email).trim().toLowerCase());
   const roleLabel=isSystemAdmin?'システム管理者':role==='admin'?'大会管理者':'一般スタッフ';
   const changeButton=isSystemAdmin?'':`<button type="button" class="btn secondary mini-btn" data-staff-role="${esc(id)}" data-next-role="${role==='admin'?'staff':'admin'}" ${list.busy||!id?'disabled':''}>${changing?'変更中…':role==='admin'?'一般スタッフに変更':'大会管理者に変更'}</button>`;
-  return `<div class="card stack"><div><b>${esc(email)}</b></div><div class="row"><span>${roleLabel}</span>${changeButton}</div></div>`;
+  return `<div class="card stack staff-list-card"><div><b>${esc(email)}</b></div><div class="row"><span>${roleLabel}</span>${changeButton}</div></div>`;
  }).join('');
- return `<h2>スタッフ管理</h2><div class="card stack"><p class="prompt">大会ごとにスタッフを招待・管理します。操作できるのはシステム管理者と、その大会の管理者だけです。</p><div><label for="staffInviteTournament"><b>対象大会</b></label><select class="field" id="staffInviteTournament" ${staffInviteUi.busy||staffListUi.busy?'disabled':''}>${allowed.map(t=>opt(t.id,t.name,tid)).join('')}</select></div><div><label for="staffInviteEmail"><b>招待するメールアドレス</b></label><input class="field" id="staffInviteEmail" type="email" autocomplete="email" maxlength="254" placeholder="example@example.com" value="${esc(staffInviteUi.email)}" ${staffInviteUi.busy?'disabled':''}></div><div><label for="staffInviteRole"><b>付与する権限</b></label><select class="field" id="staffInviteRole" ${staffInviteUi.busy?'disabled':''}><option value="staff" ${staffInviteUi.role==='staff'?'selected':''}>一般スタッフ</option><option value="admin" ${staffInviteUi.role==='admin'?'selected':''}>大会管理者</option></select></div><p class="prompt">既存アカウントには招待メールが送信されず、大会への担当登録のみ行われます。</p><button type="button" class="btn" id="staffInviteSubmit" ${staffInviteUi.busy?'disabled':''}>${staffInviteUi.busy?'処理中…':'スタッフを招待・登録'}</button>${staffInviteUi.message?`<div class="${staffInviteUi.ok?'notice':'empty-error'}" role="status">${esc(staffInviteUi.message)}</div>`:''}</div><h3>登録済みスタッフ</h3><div class="stack"><button type="button" class="btn secondary" id="staffListRefresh" ${staffListUi.busy?'disabled':''}>${staffListUi.busy?'取得中…':'スタッフ一覧を表示・更新'}</button>${listHtml}${list?.message?`<div class="notice" role="status">${esc(list.message)}</div>`:''}</div>`;
+ return `<h2>スタッフ管理</h2><div class="card stack"><p class="prompt">大会ごとにスタッフを招待・管理します。操作できるのはシステム管理者と、その大会の管理者だけです。</p><div><label for="staffInviteTournament"><b>対象大会</b></label><select class="field" id="staffInviteTournament" ${staffInviteUi.busy||staffListUi.busy?'disabled':''}>${allowed.map(t=>opt(t.id,t.name,tid)).join('')}</select></div><div><label for="staffInviteEmail"><b>招待するメールアドレス</b></label><input class="field" id="staffInviteEmail" type="email" autocomplete="email" maxlength="254" placeholder="example@example.com" value="${esc(staffInviteUi.email)}" ${staffInviteUi.busy?'disabled':''}></div><div><label for="staffInviteRole"><b>付与する権限</b></label><select class="field" id="staffInviteRole" ${staffInviteUi.busy?'disabled':''}><option value="staff" ${staffInviteUi.role==='staff'?'selected':''}>一般スタッフ</option><option value="admin" ${staffInviteUi.role==='admin'?'selected':''}>大会管理者</option></select></div><p class="prompt">既存アカウントには招待メールが送信されず、大会への担当登録のみ行われます。</p><button type="button" class="btn" id="staffInviteSubmit" ${staffInviteUi.busy?'disabled':''}>${staffInviteUi.busy?'処理中…':'スタッフを招待・登録'}</button>${staffInviteUi.message?`<div class="${staffInviteUi.ok?'notice':'empty-error'}" role="status">${esc(staffInviteUi.message)}</div>`:''}</div><h3 class="staff-list-heading">登録済みスタッフ</h3><div class="stack staff-list-container"><button type="button" class="btn secondary" id="staffListRefresh" ${staffListUi.busy?'disabled':''}>${staffListUi.busy?'取得中…':'スタッフ一覧を表示・更新'}</button>${listHtml}${list?.message?`<div class="notice" role="status">${esc(list.message)}</div>`:''}</div>`;
 }
 async function refreshStaffList(){
  const tid=staffInviteUi.tournamentId;
