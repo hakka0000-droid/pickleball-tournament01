@@ -527,6 +527,23 @@
  .staff-list-card .row{gap:8px;align-items:center}
  .staff-list-card .mini-btn{min-height:38px;padding:8px 10px}
 }
+
+/* Release UI pass 1: shared spacing and typography only; no functional changes. */
+@media screen and (max-width:759px){
+ .compact-session{margin:7px 0 5px;padding:7px 10px}
+ .page-content-head{margin:6px 0 5px}
+ .subnav{margin:3px 0!important;padding:4px 0!important}
+ .subnav button{min-height:40px}
+ #screen>.card{margin-top:10px}
+ #screen>.page-content-head~.card{margin-top:10px}
+ .staff-list-heading{margin:12px 0 7px}
+ .staff-list-container{gap:8px}
+ .staff-list-container .staff-list-card{padding:12px 13px;gap:8px}
+ .staff-list-card b{overflow-wrap:anywhere}
+}
+@media screen and (min-width:760px){
+ .page-content-head{margin:12px 0 8px}
+}
 </style><style id="bulk-generation-complete-style">
 .btn.bulk-complete:disabled{background:#e7ebee;color:#586977;opacity:1;cursor:default;border:1px solid #d4dde3;box-shadow:none}
 </style>
