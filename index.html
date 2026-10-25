@@ -1353,7 +1353,7 @@ function publicScreen(){
  return `<h2>順位・決勝</h2>${selector}${categorySelector}${switcher}${body}`;
 }
 
-function opsPublishedIds(){return new Set(state.tournaments.filter(t=>['published','in_progress','completed'].includes(t.status)).map(t=>t.id));}
+function opsPublishedIds(){return new Set(state.tournaments.filter(t=>['published','in_progress','completed'].includes(t.status)&&(state.systemAdmin||isAssignedTournamentStaff(t.id))).map(t=>t.id));}
 function visibleMatches(){const allowed=areaOf(state.tab)==='ops'?opsPublishedIds():null;return state.matches.filter(m=>{const tid=state.categories.find(c=>c.id===m.category_id)?.tournament_id;return (!allowed||allowed.has(tid))&&(state.category==='all'||m.category_id===state.category)&&(state.tournament==='all'||tid===state.tournament);});}
 // Match number search is limited to the match-list screen; retain settings after rerender and score actions.
 function normalizedMatchSearch(value){
