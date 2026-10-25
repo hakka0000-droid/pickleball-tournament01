@@ -4280,6 +4280,31 @@ async function refreshMatchNumbers(){
 async function loadData(){if(!client){state.error='Supabaseに接続できません。公開用設定を確認してください。';render();return}state.loading=true;state.error='';render();try{let [t,c,s,p,m]=await Promise.all([fetchAll('tournaments'),fetchAll('categories'),fetchAll('competition_stages'),fetchAll('pairs'),fetchAll('matches')]);state.tournaments=t;state.categories=c;clearPublishState();hydrateCapacityPlans(c);hydrateScheduleWindows(c);state.stages=s;state.pairs=p;state.matches=m;state.bracketSlots=[];state.bracketError='';state.officialResults=[];state.officialError='';state.officialLoaded=false;const officialResult=await client.rpc('get_public_category_final_results');if(officialResult.error){state.officialError=officialResult.error.message}else{state.officialResults=officialResult.data||[];state.officialLoaded=true}const slotResult=await client.rpc('get_public_knockout_bracket_slots');if(slotResult.error){state.bracketError=slotResult.error.message}else{state.bracketSlots=slotResult.data||[]}state.courtLoadError='';try{state.courts=await fetchAll('courts','id,name,tournament_id,court_type,is_active');}catch(courtError){state.courts=[];state.courtLoadError=courtError.message;}state.lastLoaded=new Date();await refreshMatchNumbers()}catch(e){state.error='データ取得に失敗しました：'+e.message}finally{state.loading=false;render();if(!state.error)await refreshRankings();if(state.tab==='ops_checkin'&&state.staff)await refreshReceptionCheckins()}}
 function closeModal(){ $('overlay').innerHTML='' }
 function modal(inner){$('overlay').innerHTML=`<div class="modalback" id="modalback"><div class="modal">${inner}</div></div>`;$('modalback').onclick=e=>{if(e.target.id==='modalback')closeModal()};document.querySelectorAll('[data-close]').forEach(x=>x.onclick=closeModal)}
+// 招待リンクからの初回パスワード設定。URL内の認証情報はSupabase SDKが処理します。
+const inviteLinkOpened=(()=>{const q=new URLSearchParams(location.search),h=new URLSearchParams(location.hash.replace(/^#/,''));return ['invite','recovery'].includes(q.get('type'))||['invite','recovery'].includes(h.get('type'));})();
+let invitePasswordPromptShown=false;
+async function showInvitePasswordSetup(){
+ if(!client||invitePasswordPromptShown)return;
+ const {data,error}=await client.auth.getSession();
+ if(error||!data?.session)return;
+ invitePasswordPromptShown=true;
+ modal(`<div class="row"><h2 style="margin:0">スタッフ初回設定</h2></div><p>招待されたアカウントのログイン用パスワードを設定してください。</p><label for="inviteNewPassword">新しいパスワード（8文字以上）</label><input class="field" id="inviteNewPassword" type="password" autocomplete="new-password" minlength="8"><label for="inviteConfirmPassword">パスワードの確認</label><input class="field" id="inviteConfirmPassword" type="password" autocomplete="new-password" minlength="8"><p id="invitePasswordMsg" class="prompt" role="status"></p><button class="btn wide" id="inviteSavePassword">パスワードを設定して開始</button><button class="btn secondary wide" id="inviteSkipPassword" type="button">後で設定する</button>`);
+ const save=$('inviteSavePassword');
+ $('inviteSkipPassword').onclick=()=>closeModal();
+ save.onclick=async()=>{
+  const password=$('inviteNewPassword').value,confirmPassword=$('inviteConfirmPassword').value,msg=$('invitePasswordMsg');
+  if(password.length<8){msg.textContent='8文字以上で入力してください。';return}
+  if(password!==confirmPassword){msg.textContent='確認用パスワードが一致しません。';return}
+  save.disabled=true;
+  try{
+   const {error}=await client.auth.updateUser({password});if(error)throw error;
+   $('inviteNewPassword').value='';$('inviteConfirmPassword').value='';
+   closeModal();await refreshAuth();await loadData();
+   alert('パスワードを設定しました。スタッフ権限がある場合は運営メニューを利用できます。');
+  }catch(e){msg.textContent='設定できませんでした：'+(e.message||String(e))}
+  finally{if(save.isConnected)save.disabled=false}
+ };
+}
 function loginModal(){modal(`<div class="row"><h2 style="margin:0">スタッフログイン</h2><button class="btn secondary mini-btn" data-close>閉じる</button></div><label>メールアドレス</label><input class="field" id="email" type="email" autocomplete="username"><label>パスワード</label><input class="field" id="password" type="password" autocomplete="current-password"><p class="prompt">V10テスト画面と同じメールアドレス・パスワードを使用します。</p><p id="authMsg" class="prompt" role="status"></p><button class="btn wide" id="signIn">ログイン</button>`);$('signIn').onclick=async()=>{let b=$('signIn');b.disabled=true;try{let {error}=await client.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});$('password').value='';if(error)throw error;closeModal();await refreshAuth();await loadData()}catch(e){$('authMsg').textContent='ログインできません：'+e.message}finally{if(b.isConnected)b.disabled=false}}}
 async function refreshAuth(){
  if(!client)return;
@@ -4321,5 +4346,5 @@ if($('confirmWalkover'))$('confirmWalkover').onclick=()=>{let value=prompt('不�
 if($('revokeWalkover'))$('revokeWalkover').onclick=()=>{const reason=prompt('不戦勝取消の理由を入力してください（必須）');if(!reason?.trim()){alert('理由が必要です');return}act(stageFor(m)?.stage_type==='preliminary'?'staff_revoke_preliminary_walkover':'staff_revoke_walkover',{p_match_id:m.id,p_expected_updated_at:m.updated_at,p_reason:reason.trim()},'不戦勝を取り消しますか？')};
 if($('revokeScore'))$('revokeScore').onclick=()=>{const reason=prompt('試合結果取消の理由を入力してください（必須）\n※後続の試合が開始・終了している場合、取消は拒否されます。');if(reason===null)return;if(!reason.trim()){alert('取消理由が必要です。');return}act('staff_revoke_score',{p_match_id:m.id,p_expected_updated_at:m.updated_at,p_reason:reason.trim()},'スコア '+m.score_a+' - '+m.score_b+' を取り消し、試合を未実施に戻しますか？\n※この操作は監査履歴に記録されます。')};
 }
-if(client){client.auth.onAuthStateChange(()=>setTimeout(async()=>{await refreshAuth();if(!state.loading&&!state.error)await refreshRankings()},0));refreshAuth().then(loadData)}else render();
+if(client){client.auth.onAuthStateChange((event)=>setTimeout(async()=>{await refreshAuth();if(!state.loading&&!state.error)await refreshRankings();if(inviteLinkOpened||event==='PASSWORD_RECOVERY')await showInvitePasswordSetup()},0));refreshAuth().then(async()=>{await loadData();if(inviteLinkOpened)await showInvitePasswordSetup()})}else render();
 </script></body></html>
