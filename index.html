@@ -1317,6 +1317,8 @@ function secondaryNavigation(){
 }
 const staffInviteUi={tournamentId:'',email:'',role:'staff',busy:false,message:'',ok:false};
 const staffListUi={tournamentId:'',rows:[],loaded:false,busy:false,error:'',message:'',editing:''};
+// SQLで確認済みのシステム管理者。画面表示用であり、権限判定はサーバー側で行う。
+const knownSystemAdminEmails=new Set(['hakka0000@gmail.com']);
 function staffManagementScreen(){
  const allowed=state.systemAdmin?state.tournaments:state.tournaments.filter(t=>state.tournamentAdminIds.includes(t.id));
  if(!state.staff||!state.systemAdminLoaded||!state.tournamentAdminLoaded||state.systemAdminError||state.tournamentAdminError||!allowed.length)return '<h2>スタッフ管理</h2><div class="notice">管理者権限を確認できません。更新してからお試しください。</div>';
@@ -1328,7 +1330,10 @@ function staffManagementScreen(){
   const email=row.email||row.user_email||row.staff_email||row.display_name||id;
   const role=row.role==='admin'?'admin':'staff';
   const changing=list.editing===id;
-  return `<div class="card stack"><div><b>${esc(email)}</b></div><div class="row"><span>${role==='admin'?'大会管理者':'一般スタッフ'}</span><button type="button" class="btn secondary mini-btn" data-staff-role="${esc(id)}" data-next-role="${role==='admin'?'staff':'admin'}" ${list.busy||!id?'disabled':''}>${changing?'変更中…':role==='admin'?'一般スタッフに変更':'大会管理者に変更'}</button></div></div>`;
+  const isSystemAdmin=knownSystemAdminEmails.has(String(email).trim().toLowerCase());
+  const roleLabel=isSystemAdmin?'システム管理者':role==='admin'?'大会管理者':'一般スタッフ';
+  const changeButton=isSystemAdmin?'':`<button type="button" class="btn secondary mini-btn" data-staff-role="${esc(id)}" data-next-role="${role==='admin'?'staff':'admin'}" ${list.busy||!id?'disabled':''}>${changing?'変更中…':role==='admin'?'一般スタッフに変更':'大会管理者に変更'}</button>`;
+  return `<div class="card stack"><div><b>${esc(email)}</b></div><div class="row"><span>${roleLabel}</span>${changeButton}</div></div>`;
  }).join('');
  return `<h2>スタッフ管理</h2><div class="card stack"><p class="prompt">大会ごとにスタッフを招待・管理します。操作できるのはシステム管理者と、その大会の管理者だけです。</p><div><label for="staffInviteTournament"><b>対象大会</b></label><select class="field" id="staffInviteTournament" ${staffInviteUi.busy||staffListUi.busy?'disabled':''}>${allowed.map(t=>opt(t.id,t.name,tid)).join('')}</select></div><div><label for="staffInviteEmail"><b>招待するメールアドレス</b></label><input class="field" id="staffInviteEmail" type="email" autocomplete="email" maxlength="254" placeholder="example@example.com" value="${esc(staffInviteUi.email)}" ${staffInviteUi.busy?'disabled':''}></div><div><label for="staffInviteRole"><b>付与する権限</b></label><select class="field" id="staffInviteRole" ${staffInviteUi.busy?'disabled':''}><option value="staff" ${staffInviteUi.role==='staff'?'selected':''}>一般スタッフ</option><option value="admin" ${staffInviteUi.role==='admin'?'selected':''}>大会管理者</option></select></div><p class="prompt">既存アカウントには招待メールが送信されず、大会への担当登録のみ行われます。</p><button type="button" class="btn" id="staffInviteSubmit" ${staffInviteUi.busy?'disabled':''}>${staffInviteUi.busy?'処理中…':'スタッフを招待・登録'}</button>${staffInviteUi.message?`<div class="${staffInviteUi.ok?'notice':'empty-error'}" role="status">${esc(staffInviteUi.message)}</div>`:''}</div><h3>登録済みスタッフ</h3><div class="stack"><button type="button" class="btn secondary" id="staffListRefresh" ${staffListUi.busy?'disabled':''}>${staffListUi.busy?'取得中…':'スタッフ一覧を表示・更新'}</button>${listHtml}${list?.message?`<div class="notice" role="status">${esc(list.message)}</div>`:''}</div>`;
 }
@@ -1350,6 +1355,7 @@ async function changeStaffRole(id,nextRole){
  const tid=staffInviteUi.tournamentId;
  const row=staffListUi.rows.find(r=>String(r.user_id||r.id)===id);
  if(!row||staffListUi.busy||!(state.systemAdmin||state.tournamentAdminIds.includes(tid)))return;
+ if(knownSystemAdminEmails.has(String(row.email||row.user_email||row.staff_email||'').trim().toLowerCase()))return;
  const label=row.email||row.user_email||row.staff_email||id;
  if(!confirm(`${label} の権限を「${nextRole==='admin'?'大会管理者':'一般スタッフ'}」に変更します。よろしいですか？`))return;
  staffListUi.busy=true;staffListUi.editing=id;staffListUi.message='';render();
