@@ -4288,7 +4288,7 @@ async function showInvitePasswordSetup(){
  const {data,error}=await client.auth.getSession();
  if(error||!data?.session)return;
  invitePasswordPromptShown=true;
- modal(`<div class="row"><h2 style="margin:0">スタッフ初回設定</h2></div><p>招待されたアカウントのログイン用パスワードを設定してください。</p><label for="inviteNewPassword">新しいパスワード（8文字以上）</label><input class="field" id="inviteNewPassword" type="password" autocomplete="new-password" minlength="8"><label for="inviteConfirmPassword">パスワードの確認</label><input class="field" id="inviteConfirmPassword" type="password" autocomplete="new-password" minlength="8"><p id="invitePasswordMsg" class="prompt" role="status"></p><button class="btn wide" id="inviteSavePassword">パスワードを設定して開始</button><button class="btn secondary wide" id="inviteSkipPassword" type="button">後で設定する</button>`);
+ modal(`<div class="row"><h2 style="margin:0">スタッフ初回設定</h2></div><p>招待されたアカウントのログイン用パスワードを設定してください。</p><label for="inviteNewPassword">新しいパスワード（8文字以上）</label><input class="field" id="inviteNewPassword" type="password" autocomplete="new-password" minlength="8"><label for="inviteConfirmPassword">パスワードの確認</label><input class="field" id="inviteConfirmPassword" type="password" autocomplete="new-password" minlength="8"><p id="invitePasswordMsg" class="prompt" role="status"></p><button class="btn wide" id="inviteSavePassword">パスワードを設定して開始</button><button class="btn secondary wide" id="inviteSkipPassword" type="button" style="margin-top:12px">後で設定する</button>`);
  const save=$('inviteSavePassword');
  $('inviteSkipPassword').onclick=()=>closeModal();
  save.onclick=async()=>{
