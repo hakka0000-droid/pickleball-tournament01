@@ -4331,7 +4331,8 @@ function simpleWithdrawalPanel(t,all){
  return `<section id="receptionWithdrawalPanel" style="scroll-margin-top:80px"><h2>欠場・不戦勝の確認</h2><div class="stack reception-withdrawal"><b>欠場ペア：${esc(selected.display_name)}</b>${plan?`<p><b>不戦勝となる予定試合：${plan.scheduled.length}件</b>${plan.affected.length-plan.scheduled.length?`（終了済み ${plan.affected.length-plan.scheduled.length}件は変更しません）`:``}</p><div class="tablebox"><table class="tbl"><thead><tr><th>試合</th><th>開始</th><th>コート</th><th>不戦勝の勝者</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="empty-error">${esc(problem)}</div>`}<label for="withdrawalConfirmReason">欠場理由（必須）</label><textarea class="field" id="withdrawalConfirmReason" maxlength="500" rows="2" ${simpleWithdrawal.busy?'disabled':''}>${esc(withdrawalShiftPreviewState.reason)}</textarea><button type="button" class="btn wide" id="confirmSimpleWithdrawal" ${enabled?'':'disabled'}>${simpleWithdrawal.busy?'確定処理中…':'欠場・不戦勝を確定'}</button>${!permitted?'<p class="prompt">公開済み・進行中の大会の管理者のみ確定できます。権限・データ取得状態を確認してください。</p>':''}${simpleWithdrawal.message?`<div class="${simpleWithdrawal.ok?'notice blue':'empty-error'}" role="status">${esc(simpleWithdrawal.message)}</div>`:''}<button type="button" class="btn secondary wide" id="closeReceptionWithdrawal" ${simpleWithdrawal.busy?'disabled':''}>閉じる</button></div></section>`;
 }
 function receptionSection(){
- const eligible=state.tournaments.filter(t=>t.status==='published'&&isAssignedTournamentStaff(t.id));
+ const allowedTournamentIds=opsPublishedIds();
+ const eligible=state.tournaments.filter(t=>allowedTournamentIds.has(t.id));
  if(!eligible.length)return '<h2>受付・欠場</h2><div class="notice">担当する公開済みの大会はありません。</div>';
  if(!eligible.some(t=>t.id===receptionView.tournamentId))receptionView.tournamentId=eligible.find(t=>t.id===state.tournament)?.id||eligible[0].id;
  const t=eligible.find(t=>t.id===receptionView.tournamentId);
